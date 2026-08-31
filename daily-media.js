@@ -57,10 +57,15 @@ const CONTENT_DIR = path.join(__dirname, 'contenido');
 const HISTORY_PATH = path.join(__dirname, 'content-history.json');
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 const HIGGSFIELD_API_BASE = 'https://api.higgsfield.ai';
-// Seedance Pro Fast: buen equilibrio costo/calidad para un primer clip corto
-// (ver higgsfield-metricool-preparacion.md para el resto de los modelos
-// disponibles — cambiar de modelo es solo cambiar este endpoint).
-const HIGGSFIELD_MODEL_PATH = '/bytedance/seedance/v1/pro/fast/text-to-video';
+// Seedance Lite: el modelo más básico de Higgsfield — se usa acá porque la
+// prueba real (31/8/2026) mostró que "Pro Fast" devuelve 404 ("modelo no
+// disponible para esta cuenta", según docs.higgsfield.ai/docs/concepts/errors
+// — un tema de plan, no de código) en la cuenta gratis/de entrada de
+// Rodrigo. Si más adelante paga un plan que incluya modelos superiores,
+// cambiar de modelo es solo cambiar este valor (ver
+// higgsfield-metricool-preparacion.md para el resto de los modelos
+// disponibles).
+const HIGGSFIELD_MODEL_PATH = '/bytedance/seedance/v1/lite/text-to-video';
 const CLIP_DURATION_SECONDS = 10;
 
 async function dropboxDownload(token, dropboxPath) {
