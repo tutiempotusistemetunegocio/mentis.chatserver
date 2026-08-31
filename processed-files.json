@@ -1,0 +1,4 @@
+{
+  "_comment": "Manifiesto de la lectura diaria (ver daily-ingest.md). Cada entrada: nombre del archivo de la carpeta de alimentación, hash, fecha en que se procesó y a qué módulos aportó.",
+  "processed": []
+}

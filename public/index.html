@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mentis — chat en vivo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+  :root{
+    --paper:#15120e; --paper-raised:#1c1812; --ink:#f1e9db; --ink-dim:#c9beac;
+    --ink-faint:#8c8172; --rule:#332c22; --accent-core:#f2a65a; --accent-product:#e8677d;
+    --user-bubble:#2a2318;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--paper); color:var(--ink); font-family:'IBM Plex Sans',sans-serif; }
+  header{ display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid var(--rule); }
+  header .dot{ width:9px; height:9px; border-radius:50%; background:var(--accent-core); }
+  header .name{ font-family:'Big Shoulders',sans-serif; font-weight:800; text-transform:uppercase; }
+  header .tag{ font-size:0.68rem; color:var(--accent-core); border:1px solid var(--accent-core); padding:1px 7px; text-transform:uppercase; }
+  header .mode{ margin-left:auto; font-size:0.72rem; color:var(--ink-faint); font-family:'IBM Plex Mono',monospace; }
+  main{ max-width:680px; margin:0 auto; padding:24px 16px 120px; min-height:70vh; }
+  .msg{ margin-bottom:18px; max-width:88%; padding:12px 16px; line-height:1.55; white-space:pre-wrap; }
+  .msg.user{ margin-left:auto; background:var(--user-bubble); border:1px solid var(--rule); border-radius:14px 14px 4px 14px; }
+  .msg.bot{ background:var(--paper-raised); border-left:3px solid var(--accent-core); border-radius:2px; }
+  .msg.bot .label{ display:block; font-size:0.7rem; color:var(--accent-core); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; font-family:'IBM Plex Mono',monospace; }
+  form{ position:fixed; bottom:0; left:0; right:0; background:rgba(21,18,14,0.95); border-top:1px solid var(--rule); padding:14px 16px; display:flex; gap:10px; max-width:680px; margin:0 auto; }
+  form input{ flex:1; background:var(--paper-raised); border:1px solid var(--rule); color:var(--ink); padding:12px 14px; font-family:inherit; font-size:0.95rem; }
+  form input:focus{ outline:1px solid var(--accent-core); }
+  form button{ background:var(--accent-core); color:#1a1408; border:none; padding:0 20px; font-weight:600; cursor:pointer; }
+  form button:disabled{ opacity:0.5; cursor:not-allowed; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="dot"></span>
+    <span class="name">Mentis</span>
+    <span class="tag">premium</span>
+    <span class="mode" id="mode">verificando…</span>
+  </header>
+  <main id="chat"></main>
+  <form id="form">
+    <input id="input" type="text" placeholder="Escribí tu pregunta a Mentis…" autocomplete="off" required>
+    <button type="submit">Enviar</button>
+  </form>
+
+<script>
+  const chat = document.getElementById('chat');
+  const form = document.getElementById('form');
+  const input = document.getElementById('input');
+  const modeLabel = document.getElementById('mode');
+
+  fetch('/health').then(r => r.json()).then(d => {
+    modeLabel.textContent = d.mode === 'live' ? '● en vivo' : '● modo demo';
+  }).catch(() => { modeLabel.textContent = 'sin conexión'; });
+
+  function addMsg(text, who) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + who;
+    if (who === 'bot') {
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = 'Mentis';
+      div.appendChild(label);
+      div.appendChild(document.createTextNode(text));
+    } else {
+      div.textContent = text;
+    }
+    chat.appendChild(div);
+    div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const message = input.value.trim();
+    if (!message) return;
+    addMsg(message, 'user');
+    input.value = '';
+    input.disabled = true;
+
+    try {
+      const res = await fetch('/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      const data = await res.json();
+      addMsg(data.reply || data.error || 'No hubo respuesta.', 'bot');
+    } catch (err) {
+      addMsg('No se pudo conectar con Mentis. Revisá que el servidor esté corriendo.', 'bot');
+    } finally {
+      input.disabled = false;
+      input.focus();
+    }
+  });
+</script>
+</body>
+</html>

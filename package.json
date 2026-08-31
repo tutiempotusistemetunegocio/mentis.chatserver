@@ -1,0 +1,13 @@
+{
+  "name": "mentis-chat-server",
+  "version": "0.1.0",
+  "description": "Módulo 08 — instancia servida de Mentis para el chat de clientes premium. Sin dependencias externas: solo Node.js.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "sync-knowledge": "node sync-dropbox.js"
+  },
+  "dependencies": {}
+}
