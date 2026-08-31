@@ -392,6 +392,28 @@ const server = http.createServer((req, res) => {
     return sendJSON(res, 200, { ok: true, mode: process.env.ANTHROPIC_API_KEY ? 'live' : 'demo' });
   }
 
+  // Lectura diaria de la carpeta de alimentación (Módulo 01 → conocimiento,
+  // ver daily-ingest.js y daily-ingest.md). Corre adentro de este mismo
+  // servicio, con las mismas claves ya cargadas en Render — nunca se le pasa
+  // ningún secreto nuevo a nadie más. Protegido con un secreto propio
+  // (INGEST_SECRET) para que no cualquiera pueda dispararla desde afuera;
+  // sin ese secreto configurado, la ruta queda cerrada por completo.
+  if (req.method === 'POST' && req.url === '/internal/daily-ingest') {
+    const expected = process.env.INGEST_SECRET;
+    const got = req.headers['x-ingest-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'INGEST_SECRET no está configurado — la lectura diaria está desactivada hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runDailyIngest } = require('./daily-ingest');
+    runDailyIngest()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error en la lectura diaria:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/webhook/systeme-premium') {
     return handleAccessWebhook(req, res, PREMIUM_ACCESS_FILE, 'SYSTEME_PREMIUM_WEBHOOK_SECRET');
   }

@@ -1,45 +1,33 @@
 # Lectura diaria de la carpeta de alimentación — Módulo 01 → conocimiento
 
-Esto no es un script — es la tarea que corre **Claude Code en vivo**, todos los días, porque clasificar y sintetizar contenido nuevo necesita razonamiento real, no solo mover archivos. Esta es la diferencia con `sync-dropbox.js` / `push-dropbox.js`, que son mecánicos (bajar/subir archivos) y no necesitan a Claude despierto.
+**Ya está implementado**, no es solo una especificación: la lógica completa vive en `daily-ingest.js`, corriendo dentro del mismo servidor (`mentis-chat-server`, Módulo 08) — expuesta como la ruta protegida `POST /internal/daily-ingest`. Esto reemplaza la idea original de una sesión aparte de Claude Code corriendo la tarea: en vez de eso, para cada libro nuevo el servidor le hace una llamada directa a la API de Claude para que decida a qué categorías aporta y sintetice los principios — sigue siendo razonamiento real, no un script puramente mecánico, pero corre adentro del mismo proceso que ya tiene las claves configuradas en Render, sin que ningún secreto tenga que viajar a ningún otro lado. Esta es la diferencia con `sync-dropbox.js` / `push-dropbox.js`, que son mecánicos de verdad (bajar/subir archivos tal cual) y no necesitan que Claude razone nada.
 
-Aclaración explícita de Rodrigo: esto corre **en la nube**, como una tarea programada — no es algo que Rodrigo tenga que instalar ni dejar corriendo en su computadora. El entorno donde corre esta tarea es el mismo tipo de entorno en el que se diseñó y montó todo este sistema.
+Aclaración explícita de Rodrigo, ya cumplida: esto corre **en la nube**, nunca en su computadora — el servidor vive en Render, se dispara desde GitHub Actions, y nada de esto depende de que Rodrigo tenga algo instalado o prendido de su lado.
 
-## Qué hace, paso a paso
+## Qué hace, paso a paso (lo que hace `daily-ingest.js` en código real)
 
-1. **Lista lo nuevo.** Mira la carpeta de alimentación (Módulo 01, en Dropbox) y la compara contra `processed-files.json` (manifiesto: qué archivo, cuándo se procesó, con qué hash). Solo procesa lo que es nuevo o cambió — nunca reprocesa todo desde cero.
-2. **Lee cada archivo nuevo.**
-   - PDF y texto: Claude Code los lee directo, sin conversión.
-   - Word (.docx): necesita un paso de conversión antes de leerse (`pandoc`, disponible en el entorno de la nube donde corre esta tarea) — Claude Code puede correr ese comando él mismo antes de leer el resultado.
-   - Notas de voz: **descartadas** — decisión de Rodrigo, no agregaban valor extra frente a PDF/Word/texto. La carpeta de alimentación solo recibe esos tres formatos.
-3. **Clasifica por módulo.** Cada archivo (o cada idea dentro de un archivo largo) puede tocar uno o varios de los módulos de conocimiento (uno por categoría — ver el plano para la lista completa, ya no son 7 fijos). No fuerza un solo módulo por archivo — un libro de ventas puede tener un capítulo que en realidad es de mentalidad, y eso va al bloque de mentalidad.
-4. **Sintetiza, no pega.** Por cada idea nueva y realmente útil, la agrega al archivo `knowledge/<módulo>.md` correspondiente, en el mismo formato que ya tienen esos archivos (principios cortos, aplicados, sin relleno) — nunca copia el texto completo del libro o la nota. Si el archivo ya tiene una idea parecida, la actualiza o la funde con la existente en vez de duplicarla. Lo aprendido en ciclos anteriores sigue vigente por defecto — esto suma, no reemplaza.
-5. **Condensa la redacción cuando hace falta — nunca borra conocimiento.** Si un archivo de módulo está creciendo mucho, este es el momento de repasarlo entero y apretar la redacción — juntar ideas repetidas, sacar relleno — igual que Rodrigo revisaría sus propias notas de vez en cuando. Esto es un límite duro, no una preferencia de estilo: **ninguna idea real se elimina del archivo, nunca, bajo ningún criterio de antigüedad.**
-6. **Marca lo desactualizado, no lo borres.** Si una idea específica quedó obsoleta (algo más reciente y mejor fundamentado la contradice, o cambió la realidad que describía — por ejemplo, un dato de un algoritmo de red social que ya cambió), no se elimina la línea: se le agrega la etiqueta `[desactualizado: <motivo corto>]` al principio. Sigue físicamente en el archivo, archivada — Mentis simplemente no la usa como base para responder mientras tenga esa etiqueta. Si más adelante alguna otra información confirma que sí sigue vigente, se le puede sacar la etiqueta — por eso nunca se borra.
-7. **Actualiza el manifiesto** (`processed-files.json`) marcando los archivos de este ciclo como procesados.
-8. **Sube los cambios a Dropbox** corriendo `node push-dropbox.js`, para que la instancia servida del chat (Módulo 08) tenga el conocimiento fresco ese mismo día.
+1. **Trae lo último de Dropbox primero.** Antes de tocar nada local, sincroniza `knowledge/` y el manifiesto (`processed-files.json`) desde Dropbox — el disco de Render no está garantizado entre reinicios, así que Dropbox es la fuente de verdad, nunca el disco local de la instancia.
+2. **Lista lo nuevo.** Mira la carpeta de alimentación (Módulo 01, en Dropbox — **una sola carpeta plana, sin subcarpetas por categoría**: Rodrigo sube todo ahí junto, sin ordenar nada) y la compara contra el manifiesto usando el `content_hash` que da Dropbox. Solo procesa lo que es nuevo o cambió — nunca reprocesa todo desde cero.
+3. **Extrae el texto de cada archivo nuevo**, hasta un máximo por corrida (`INGEST_MAX_FILES_PER_RUN`, default 3 — para no pasarse de tiempo ni de costo de API en una sola ejecución; lo que sobra queda para la corrida del día siguiente):
+   - PDF: con la librería `pdf-parse`.
+   - Word (.docx): con la librería `mammoth`.
+   - Texto plano: directo.
+   - Notas de voz: **descartadas** — decisión de Rodrigo, no agregaban valor extra frente a PDF/Word/texto. La carpeta de alimentación solo recibe esos tres formatos, y el código ni siquiera intenta procesar otra cosa.
+4. **Clasifica por categoría — esto lo hace el sistema, nunca Rodrigo a mano**, con una llamada a la API de Claude por documento. Un mismo archivo puede tocar una o varias de las 17 categorías con módulo propio a la vez (ver el plano para la lista completa) — un libro de ventas puede tener un capítulo que en realidad es de mentalidad, y eso va al bloque de mentalidad. Justamente por esto la carpeta de origen queda plana y sin ordenar: pre-clasificar en subcarpetas no tendría sentido.
+5. **Sintetiza, no pega.** Por cada idea nueva y realmente útil, la agrega al archivo `knowledge/<categoría>.md` correspondiente, en el mismo formato que ya tienen esos archivos (principios cortos, aplicados, sin relleno) — nunca copia el texto completo del libro. El código deduplica automáticamente: si una línea ya existe tal cual, no la vuelve a agregar. Lo aprendido en ciclos anteriores sigue vigente por defecto — esto suma, nunca reemplaza.
+6. **Marca lo desactualizado, nunca lo borra.** Si el documento nuevo contradice algo que ya está escrito, el código no edita ni elimina esa línea — le agrega la etiqueta `[desactualizado: reemplazado por lectura más reciente]` delante, y la deja archivada en el mismo lugar. `server.js` ya sabe ignorar cualquier línea con esa etiqueta al armar sus respuestas (ver el prompt en `buildSystemPrompt`), pero la línea nunca desaparece del archivo. Esto es un límite duro en el código, no una preferencia de estilo: no hay ninguna ruta en `daily-ingest.js` que elimine una línea de conocimiento.
+7. **Actualiza el manifiesto y sube todo a Dropbox** — `knowledge/` completo (vía `push-dropbox.js`) y el manifiesto actualizado — para que la instancia servida del chat (este mismo proceso, de hecho) tenga el conocimiento fresco al toque, y para que sobreviva si Render reinicia el servicio.
 
-## Cuándo corre
+## Cómo se dispara todos los días
 
-Antes de la generación de contenido de las 7am (Módulo 03) — así el guion del día ya se arma con cualquier libro o nota que Rodrigo haya subido el día anterior. Sugerencia: 6:00am, como tarea programada diaria.
+Un workflow de GitHub Actions (`.github/workflows/daily-ingest.yml`) llama a `POST /internal/daily-ingest` una vez por día (10:00 UTC por default, ajustable en el archivo — pensado para correr antes de la generación de contenido de las 7am hora de Rodrigo, Módulo 03, así el guion del día ya cuenta con lo que se subió el día anterior). También se puede disparar a mano en cualquier momento desde la pestaña "Actions" del repositorio en GitHub, sin esperar al horario — útil para probar.
 
-## Prompt de ejemplo para la tarea programada
+Configuración necesaria, una sola vez:
+- En Render: cargar `INGEST_SECRET` (cualquier string largo y random) además de `ANTHROPIC_API_KEY` y `DROPBOX_ACCESS_TOKEN`, que ya deberían estar.
+- En GitHub (`Settings → Secrets and variables → Actions`): `MENTIS_INGEST_URL` (la URL del servidor + `/internal/daily-ingest`) y `MENTIS_INGEST_SECRET` (el mismo valor que `INGEST_SECRET` en Render).
 
-```
-Corré la lectura diaria de Mentis. Mirá la carpeta de alimentación en
-Dropbox, compará contra processed-files.json, y procesá solo los archivos
-nuevos o cambiados (PDF, Word o texto — no hay notas de voz, esa vía se
-descartó). Para cada uno: leelo (convertí los .docx con pandoc antes si
-hace falta), clasificalo en uno o varios de los módulos de conocimiento
-correspondientes, y agregá al archivo knowledge/<módulo>.md las ideas
-nuevas y útiles en el mismo formato que ya tienen esos archivos — sin
-copiar texto completo, sin duplicar ideas ya presentes. Si algún archivo
-de conocimiento quedó muy largo, apretá la redacción — pero nunca borres
-una idea real. Si alguna idea existente quedó obsoleta o contradicha por
-algo nuevo, marcala con "[desactualizado: motivo]" en vez de eliminarla.
-Actualizá processed-files.json al final, y corré "node push-dropbox.js"
-para subir los cambios.
-```
+Sin `INGEST_SECRET` configurado en Render, la ruta queda completamente cerrada — ni siquiera intenta correr nada, devuelve un error explicando que falta configurarlo.
 
 ## Notas de voz: descartadas
 
-Rodrigo decidió sacar esta vía — no iba a otorgar valor agregado frente a lo que ya cubren PDF, Word y texto, y evita la complejidad extra de elegir y pagar un servicio de transcripción. La carpeta de alimentación solo recibe esos tres formatos.
+Rodrigo decidió sacar esta vía — no iba a otorgar valor agregado frente a lo que ya cubren PDF, Word y texto, y evita la complejidad extra de elegir y pagar un servicio de transcripción. La carpeta de alimentación solo recibe esos tres formatos, y `daily-ingest.js` directamente no sabe procesar ningún otro.

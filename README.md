@@ -62,7 +62,11 @@ Para que este servidor *suba* cambios (no solo bajarlos) — por ejemplo despué
 
 Esto responde a algo que pediste explícitamente: que Mentis lea todos los días lo que vas subiendo a la carpeta de alimentación (libros, notas, experiencias) en sus módulos de conocimiento, y aprenda de ahí — no que el conocimiento quede fijo desde el primer día.
 
-No es un script de este proyecto — es una tarea que corre **Claude Code en vivo**, porque clasificar contenido nuevo y decidir qué vale la pena guardar necesita razonamiento real, no solo mover archivos. Está completamente especificada, con el prompt exacto para programarla como tarea diaria, en **[`daily-ingest.md`](./daily-ingest.md)**. En resumen: lee lo nuevo de la carpeta de alimentación, lo clasifica en una o varias de las categorías del catálogo (ver el plano para la lista completa), sintetiza las ideas útiles dentro de los archivos de `knowledge/` (sin copiar texto completo ni duplicar lo que ya está), y sube los cambios con `push-dropbox.js` para que el chat de clientes los tenga ese mismo día.
+**Ya está implementado**, no es solo una especificación: `daily-ingest.js` corre dentro de este mismo servidor, expuesto como la ruta protegida `POST /internal/daily-ingest`. No es un script puramente mecánico — para cada libro nuevo le pide a la API de Claude que decida a qué categorías aporta y sintetice los principios (nunca copia texto textual, nunca duplica lo que ya está), porque eso necesita razonamiento real, no solo mover archivos. La diferencia con la primera versión de este plano es dónde corre ese razonamiento: en vez de una sesión aparte de Claude Code, es una llamada directa a la API de Claude adentro del propio servidor — así reusa las mismas claves que ya están cargadas en Render (`ANTHROPIC_API_KEY`, `DROPBOX_ACCESS_TOKEN`) sin que ningún secreto tenga que pasar por ningún lado más.
+
+El detalle completo de la lógica (qué carpeta mira, cómo decide qué es nuevo, cómo se dispara todos los días sin que Rodrigo haga nada) está en **[`daily-ingest.md`](./daily-ingest.md)**. En resumen: lee lo nuevo de la carpeta de alimentación (una carpeta plana, sin subcarpetas — Rodrigo sube todo junto), lo clasifica en una o varias de las categorías del catálogo, sintetiza las ideas útiles dentro de los archivos de `knowledge/` (sin copiar texto completo ni duplicar lo que ya está, y marcando — nunca borrando — lo que quedó desactualizado), y sube los cambios a Dropbox para que el chat de clientes los tenga ese mismo día.
+
+**Cómo se dispara todos los días:** un workflow de GitHub Actions (`.github/workflows/daily-ingest.yml`, ya incluido en el repo) llama a esa ruta una vez por día — gratis, sin depender de ningún otro servicio. Solo hace falta cargar dos secretos una vez en GitHub (`Settings → Secrets and variables → Actions`): `MENTIS_INGEST_URL` (la URL del servidor + `/internal/daily-ingest`) y `MENTIS_INGEST_SECRET` (el mismo valor que `INGEST_SECRET` en Render). También se puede disparar a mano en cualquier momento desde la pestaña "Actions" de GitHub (botón "Run workflow"), útil para probar sin esperar al horario programado.
 
 Rodrigo decidió sacar las notas de voz de la carpeta de alimentación — no otorgaban valor agregado frente a PDF, Word y texto, que son los tres formatos que se procesan.
 
@@ -84,10 +88,12 @@ Después, la página de venta en Systeme.io (Módulo 04) puede enlazar o embeber
 ## Archivos
 
 ```
-server.js             → el servidor (rutas /health y /chat, elige el conocimiento, llama a Claude)
+server.js             → el servidor (rutas /health, /chat y /internal/daily-ingest, elige el conocimiento, llama a Claude)
+daily-ingest.js        → implementación real de la lectura diaria — lee Dropbox, clasifica con la API de Claude, actualiza knowledge/
+.github/workflows/daily-ingest.yml → dispara daily-ingest.js una vez por día, gratis, vía GitHub Actions
 sync-dropbox.js        → baja los archivos de conocimiento desde Dropbox
 push-dropbox.js        → sube los archivos de conocimiento a Dropbox (tras la lectura diaria)
-daily-ingest.md         → especificación de la tarea diaria de lectura (para Claude Code, no un script)
+daily-ingest.md         → cómo funciona la lectura diaria, en detalle (complementa a daily-ingest.js)
 processed-files.json    → manifiesto de qué archivos de alimentación ya se procesaron
 knowledge/               → un archivo por categoría + reglas.md (se actualiza solo con la lectura diaria)
 guide-catalog.md         → especificación de la generación del catálogo de guías (para Claude Code, no un script)
