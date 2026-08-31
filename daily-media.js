@@ -51,7 +51,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { syncFromDropbox } = require('./sync-dropbox');
 
 const CONTENT_DIR = path.join(__dirname, 'contenido');
 const HISTORY_PATH = path.join(__dirname, 'content-history.json');
@@ -147,7 +146,11 @@ async function runDailyMedia(webhookBaseUrl) {
   if (!higgsfieldAuthHeader()) return { ok: false, error: 'Falta HIGGSFIELD_KEY_ID o HIGGSFIELD_KEY_SECRET en las variables de entorno.' };
   if (!webhookSecret) return { ok: false, error: 'Falta HIGGSFIELD_WEBHOOK_SECRET en las variables de entorno.' };
 
-  await syncFromDropbox();
+  // A diferencia de daily-script.js, esto NO necesita el conocimiento
+  // (knowledge/) para nada — solo el ángulo ya guardado en el historial. Se
+  // sacó el syncFromDropbox() de acá (se pedía sin usarlo) tras confirmar
+  // que Render free tier se quedó sin memoria (512MB) en una corrida real —
+  // menos trabajo innecesario por corrida ayuda a no acercarse a ese techo.
   try {
     const buf = await dropboxDownload(dropboxToken, `${CONTENT_FOLDER}/content-history.json`);
     fs.writeFileSync(HISTORY_PATH, buf);
