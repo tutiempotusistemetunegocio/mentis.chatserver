@@ -55,7 +55,19 @@ async function syncFromDropbox() {
     body: JSON.stringify({ path: DROPBOX_FOLDER }),
   });
   const listing = await listRes.json();
-  if (!listRes.ok) throw new Error(listing.error_summary || `HTTP ${listRes.status}`);
+  if (!listRes.ok) {
+    const summary = listing.error_summary || `HTTP ${listRes.status}`;
+    // Primera vez que corre esto en una cuenta de Dropbox nueva: la carpeta
+    // todavía no existe porque nadie subió nada ahí todavía (push-dropbox.js
+    // la crea sola la primera vez que sube algo). No es un error real —
+    // seguimos con lo que ya haya en /knowledge (el conocimiento semilla que
+    // viene en el propio código) en vez de cortar toda la lectura diaria.
+    if (summary.startsWith('path/not_found')) {
+      console.log(`La carpeta ${DROPBOX_FOLDER} todavía no existe en Dropbox — nada que sincronizar todavía, se sigue con el conocimiento local.`);
+      return;
+    }
+    throw new Error(summary);
+  }
 
   if (!fs.existsSync(KNOWLEDGE_DIR)) fs.mkdirSync(KNOWLEDGE_DIR, { recursive: true });
 
