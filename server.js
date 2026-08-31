@@ -343,18 +343,46 @@ function hasAccess(file, email) {
 // separados a nivel de función, no solo de dato, para que un error de
 // configuración no termine dándole a un alumno acceso al chat premium o
 // viceversa.
-function handleAccessWebhook(req, res, file, secretEnvVar) {
+//
+// Systeme.io no permite mandar headers propios en sus webhooks (solo se
+// puede configurar la URL de destino) — así que el secreto viaja como un
+// segmento más en la URL (/webhook/systeme-premium/<secreto>), no como
+// header. Se sigue aceptando también el header x-webhook-secret, para poder
+// seguir probando a mano con curl sin tener que pegar el secreto en la URL.
+//
+// El payload real de Systeme.io (ver help.systeme.io/article/2930) trae el
+// email adentro de data.customer.email (venta) o data.contact.email
+// (opt-in), y el tipo de evento en el campo "type" (ej.
+// "customer.sale.completed", o algo con "cancel"/"refund" para una baja) —
+// no es la forma simple {email, event} que se usó para probar con curl al
+// principio. Se acepta cualquiera de las dos formas.
+function extractWebhookEmail(parsed) {
+  const email =
+    parsed.email ||
+    (parsed.data && parsed.data.customer && parsed.data.customer.email) ||
+    (parsed.data && parsed.data.contact && parsed.data.contact.email) ||
+    '';
+  return String(email).trim();
+}
+
+function isCancelEvent(parsed) {
+  const kind = String(parsed.event || parsed.type || '').toLowerCase();
+  return kind.includes('cancel') || kind.includes('refund');
+}
+
+function handleAccessWebhook(req, res, file, secretEnvVar, urlSecret) {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
     const expected = process.env[secretEnvVar];
-    const got = req.headers['x-webhook-secret'];
-    if (!expected || got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    const headerSecret = req.headers['x-webhook-secret'];
+    if (!expected) return sendJSON(res, 501, { error: `${secretEnvVar} no está configurado.` });
+    if (urlSecret !== expected && headerSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
     let parsed;
     try { parsed = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON inválido.' }); }
-    const email = (parsed.email || '').trim();
+    const email = extractWebhookEmail(parsed);
     if (!email) return sendJSON(res, 400, { error: 'Falta el email.' });
-    if (parsed.event === 'refund' || parsed.event === 'cancel') {
+    if (isCancelEvent(parsed)) {
       revokeAccess(file, email);
       return sendJSON(res, 200, { ok: true, email, active: false });
     }
@@ -414,12 +442,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'POST' && req.url === '/webhook/systeme-premium') {
-    return handleAccessWebhook(req, res, PREMIUM_ACCESS_FILE, 'SYSTEME_PREMIUM_WEBHOOK_SECRET');
+  // Acepta tanto /webhook/systeme-premium (secreto por header, para probar
+  // con curl) como /webhook/systeme-premium/<secreto> (para pegar en
+  // Systeme.io, que no permite headers propios) — mismo para -panel.
+  if (req.method === 'POST' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/webhook/systeme-premium')) {
+    const urlSecret = req.url.split('?')[0].replace(/\/+$/, '').slice('/webhook/systeme-premium'.length + 1) || null;
+    return handleAccessWebhook(req, res, PREMIUM_ACCESS_FILE, 'SYSTEME_PREMIUM_WEBHOOK_SECRET', urlSecret);
   }
 
-  if (req.method === 'POST' && req.url === '/webhook/systeme-panel') {
-    return handleAccessWebhook(req, res, PANEL_ACCESS_FILE, 'SYSTEME_PANEL_WEBHOOK_SECRET');
+  if (req.method === 'POST' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/webhook/systeme-panel')) {
+    const urlSecret = req.url.split('?')[0].replace(/\/+$/, '').slice('/webhook/systeme-panel'.length + 1) || null;
+    return handleAccessWebhook(req, res, PANEL_ACCESS_FILE, 'SYSTEME_PANEL_WEBHOOK_SECRET', urlSecret);
   }
 
   if (req.method === 'POST' && req.url === '/chat') {
