@@ -511,6 +511,27 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Carpeta de medios (Módulo 03 → daily-photo.js) — elige la foto que
+  // acompaña el reel de hoy. A diferencia de daily-media (Higgsfield), esto
+  // es síncrono: la llamada a Claude visión responde en la misma petición,
+  // no hay webhook. Mismo patrón de secreto que el resto de las rutas
+  // /internal/*.
+  if (req.method === 'POST' && req.url === '/internal/daily-photo') {
+    const expected = process.env.PHOTO_SECRET;
+    const got = req.headers['x-photo-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'PHOTO_SECRET no está configurado — la carpeta de medios está desactivada hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runDailyPhoto } = require('./daily-photo');
+    runDailyPhoto()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error eligiendo la foto diaria:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   // Acepta tanto /webhook/systeme-premium (secreto por header, para probar
   // con curl) como /webhook/systeme-premium/<secreto> (para pegar en
   // Systeme.io, que no permite headers propios) — mismo para -panel.

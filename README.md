@@ -82,7 +82,13 @@ Tampoco prioriza un "ángulo ganador" de forma adaptativa todavía, porque eso n
 
 Sigue al guion diario: una vez que el guion de hoy está escrito, `daily-media.js` le pide a Higgsfield un clip de video corto (10s, vertical) basado en el ángulo de ese guion — expuesto como `POST /internal/daily-media` (dispara el pedido, protegido con `MEDIA_SECRET`) y `POST /webhook/higgsfield-listo/<secreto>/<fecha>` (recibe el aviso cuando el clip está listo y lo sube a Dropbox). Disparado a diario por `.github/workflows/daily-media.yml`, 15 minutos después del guion diario.
 
-Como ningún modelo de Higgsfield genera un video de 60s de una sola vez (el máximo real es de 8 a 12s), esto entrega un clip corto de gancho/portada, no el reel completo armado — el detalle completo, incluida esta salvedad y por qué el secreto del webhook va en la URL (Higgsfield no manda headers propios ni firma sus avisos), está en **[`daily-media.md`](./daily-media.md)**. Metricool y el resto de las piezas de Módulo 03 (armado final, carpeta de medios, control de calidad) siguen documentadas como preparación, no construidas, en **[`higgsfield-metricool-preparacion.md`](./higgsfield-metricool-preparacion.md)**.
+Como ningún modelo de Higgsfield genera un video de 60s de una sola vez (el máximo real es de 8 a 12s), esto entrega un clip corto de gancho/portada, no el reel completo armado — el detalle completo, incluida esta salvedad y por qué el secreto del webhook va en la URL (Higgsfield no manda headers propios ni firma sus avisos), está en **[`daily-media.md`](./daily-media.md)**. Metricool y el resto de las piezas de Módulo 03 (armado final, control de calidad) siguen documentadas como preparación, no construidas, en **[`higgsfield-metricool-preparacion.md`](./higgsfield-metricool-preparacion.md)**.
+
+## Carpeta de medios — elige la foto del día (Módulo 03)
+
+Corre en paralelo a Higgsfield, no en su lugar: mientras el clip generado desde cero sigue bloqueado por la cuenta/plan de Higgsfield, esto ya funciona hoy con fotos reales que Rodrigo suba a Dropbox. **Ya está implementado**: `daily-photo.js` corre dentro de este mismo servidor, expuesto como `POST /internal/daily-photo` (síncrono — no hay webhook, la llamada a Claude visión responde en la misma petición), protegido con `PHOTO_SECRET` y disparado a diario por `.github/workflows/daily-photo.yml`, 10 minutos antes del video diario.
+
+Describe cada foto nueva una sola vez con Claude (visión) y guarda esa descripción; el día a día compara el ángulo del guion de hoy contra las descripciones ya guardadas y elige la que mejor conecta, evitando repetir una foto usada en los últimos 15 días. El detalle completo, incluidos los cuatro criterios de selección (por qué ese orden, y por qué a propósito no hay desempate por "calidad" ni análisis de video todavía), está en **[`daily-photo.md`](./daily-photo.md)**. Sin fotos subidas a `/mentis-medios` en Dropbox, cada corrida responde que no hay nada para elegir — no está roto, solo vacío.
 
 ## Ponerlo en línea (para que un cliente lo use desde cualquier lado)
 
@@ -102,18 +108,21 @@ Después, la página de venta en Systeme.io (Módulo 04) puede enlazar o embeber
 ## Archivos
 
 ```
-server.js             → el servidor (rutas /health, /chat, /internal/daily-ingest, /internal/daily-script, /internal/daily-media, /webhook/higgsfield-listo; elige el conocimiento, llama a Claude)
+server.js             → el servidor (rutas /health, /chat, /internal/daily-ingest, /internal/daily-script, /internal/daily-media, /webhook/higgsfield-listo, /internal/daily-photo; elige el conocimiento, llama a Claude)
 daily-ingest.js        → implementación real de la lectura diaria — lee Dropbox, clasifica con la API de Claude, actualiza knowledge/
 .github/workflows/daily-ingest.yml → dispara daily-ingest.js una vez por día, gratis, vía GitHub Actions
 daily-script.js         → implementación real del guion diario (Módulo 03) — escribe el guion de reel/carrusel/podcast, lo sube a Dropbox
 .github/workflows/daily-script.yml → dispara daily-script.js una vez por día, gratis, vía GitHub Actions
 daily-media.js           → implementación real del video diario (Módulo 03) — le pide un clip corto a Higgsfield, lo sube a Dropbox cuando avisa que terminó
 .github/workflows/daily-media.yml → dispara daily-media.js una vez por día, gratis, vía GitHub Actions
+daily-photo.js           → implementación real de la carpeta de medios (Módulo 03) — elige, entre las fotos de Dropbox, cuál acompaña el reel de hoy
+.github/workflows/daily-photo.yml → dispara daily-photo.js una vez por día, gratis, vía GitHub Actions
 sync-dropbox.js        → baja los archivos de conocimiento desde Dropbox
 push-dropbox.js        → sube los archivos de conocimiento a Dropbox (tras la lectura diaria)
 daily-ingest.md         → cómo funciona la lectura diaria, en detalle (complementa a daily-ingest.js)
 daily-script.md         → cómo funciona el guion diario, en detalle (complementa a daily-script.js)
 daily-media.md           → cómo funciona el video diario, en detalle (complementa a daily-media.js)
+daily-photo.md           → cómo funciona la carpeta de medios, en detalle — incluye los 4 criterios de selección (complementa a daily-photo.js)
 higgsfield-metricool-preparacion.md → lo que falta de Metricool y del armado final del Módulo 03, investigado pero no construido todavía
 processed-files.json    → manifiesto de qué archivos de alimentación ya se procesaron
 content-history.json    → historial de guiones generados, para no repetir ángulo/tema (se crea solo)
