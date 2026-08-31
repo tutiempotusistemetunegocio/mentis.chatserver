@@ -36,9 +36,11 @@ La respuesta del endpoint `/chat` incluye `usedBlocks` (bloques principales) y `
 
 ## Acceso — dos sistemas separados
 
-Rodrigo pidió dos accesos que nunca se cruzan: uno para el cliente premium del chat (paga el acceso a Mentis, Módulo 04/08) y otro para el alumno de la formación en vivo que recibe su propia copia del panel personal (Módulo 02). Cada uno tiene su propio manifiesto (`access-premium.json` / `access-panel-alumnos.json`, ambos ignorados por git — nunca se suben), su propio webhook (`/webhook/systeme-premium` y `/webhook/systeme-panel`) y su propio secreto compartido con Systeme.io (`SYSTEME_PREMIUM_WEBHOOK_SECRET` / `SYSTEME_PANEL_WEBHOOK_SECRET` en `.env`). Con `REQUIRE_ACCESS_CHECK=false` (el default) el servidor no exige acceso, para poder seguir probando en local sin depender de Systeme.io — ponelo en `true` antes de mostrárselo a un cliente real. El chat exige el header `x-mentis-email` y valida contra `access-premium.json`; el acceso al panel replicado usa el mismo mecanismo (`access-panel-alumnos.json`) desde donde sea que termine sirviéndose ese panel.
+Rodrigo pidió dos accesos que nunca se cruzan: uno para el cliente premium del chat (paga el acceso a Mentis, Módulo 04/08) y otro para el alumno de la formación en vivo que recibe su propia copia del panel personal (Módulo 02). Cada uno tiene su propio manifiesto (`access-premium.json` / `access-panel-alumnos.json`, ambos ignorados por git — nunca se suben), su propio webhook (`/webhook/systeme-premium` y `/webhook/systeme-panel`) y su propio secreto compartido con Systeme.io (`SYSTEME_PREMIUM_WEBHOOK_SECRET` / `SYSTEME_PANEL_WEBHOOK_SECRET` en `.env`). Con `REQUIRE_ACCESS_CHECK=false` (el default) el servidor no exige acceso, para poder seguir probando en local sin depender de Systeme.io — ponelo en `true` antes de mostrárselo a un cliente real.
 
-Configurar el lado de Systeme.io (que llame a estos webhooks cuando alguien compra) queda pendiente de tu cuenta real — los endpoints y el manejo del secreto ya están armados y probados, falta conectarlos del otro lado.
+Systeme.io no permite mandar headers propios en sus webhooks (solo se configura la URL de destino), así que el secreto de cada webhook va pegado al final de la URL: `/webhook/systeme-premium/<SYSTEME_PREMIUM_WEBHOOK_SECRET>` y `/webhook/systeme-panel/<SYSTEME_PANEL_WEBHOOK_SECRET>` — esas son las URLs que van directo en la automatización de Systeme.io ("Send Webhook"). El servidor también sigue aceptando el secreto por el header `x-webhook-secret` sobre la URL sin el segmento final, para poder seguir probando a mano con curl. El payload real de Systeme.io trae el email en `data.customer.email` (venta) o `data.contact.email` (opt-in) y el tipo de evento en `type` — el servidor entiende esa forma directamente; cualquier `type`/`event` que contenga "cancel" o "refund" revoca el acceso, cualquier otro lo otorga.
+
+Configuración necesaria en Systeme.io, una por producto: **Automations → Workflows** (o, dentro del funnel del producto, **Automation Rules**) → una regla con trigger "New sale" → acción "Send Webhook" → pegar la URL de arriba con el secreto correspondiente; y una segunda regla igual pero con trigger "Sale canceled", apuntando a la misma URL, para que la baja también se refleje.
 
 ## Catálogo de guías
 
@@ -70,6 +72,18 @@ El detalle completo de la lógica (qué carpeta mira, cómo decide qué es nuevo
 
 Rodrigo decidió sacar las notas de voz de la carpeta de alimentación — no otorgaban valor agregado frente a PDF, Word y texto, que son los tres formatos que se procesan.
 
+## Guion diario (Módulo 03)
+
+Mismo patrón que la lectura diaria, para la otra mitad del pedido: que Mentis escriba solo el guion de contenido de cada día. **Ya está implementado**: `daily-script.js` corre dentro de este mismo servidor, expuesto como `POST /internal/daily-script`, protegido con `SCRIPT_SECRET` y disparado a diario por `.github/workflows/daily-script.yml` (30 min después de la lectura diaria, para usar el conocimiento más fresco). Genera el guion de reel/carrusel de lunes a viernes (un ángulo distinto cada día, sin repetir los últimos usados) y el guion de podcast cada 3 días, usando todo el conocimiento cargado — y los deja como archivos fechados en `/mentis-contenido` dentro de Dropbox, junto a un historial para no repetir ángulos.
+
+Tampoco prioriza un "ángulo ganador" de forma adaptativa todavía, porque eso necesita datos reales de Metricool que hoy no existen — el detalle completo, incluida esta salvedad, está en **[`daily-script.md`](./daily-script.md)**.
+
+## Video diario (Módulo 03 → Higgsfield)
+
+Sigue al guion diario: una vez que el guion de hoy está escrito, `daily-media.js` le pide a Higgsfield un clip de video corto (10s, vertical) basado en el ángulo de ese guion — expuesto como `POST /internal/daily-media` (dispara el pedido, protegido con `MEDIA_SECRET`) y `POST /webhook/higgsfield-listo/<secreto>/<fecha>` (recibe el aviso cuando el clip está listo y lo sube a Dropbox). Disparado a diario por `.github/workflows/daily-media.yml`, 15 minutos después del guion diario.
+
+Como ningún modelo de Higgsfield genera un video de 60s de una sola vez (el máximo real es de 8 a 12s), esto entrega un clip corto de gancho/portada, no el reel completo armado — el detalle completo, incluida esta salvedad y por qué el secreto del webhook va en la URL (Higgsfield no manda headers propios ni firma sus avisos), está en **[`daily-media.md`](./daily-media.md)**. Metricool y el resto de las piezas de Módulo 03 (armado final, carpeta de medios, control de calidad) siguen documentadas como preparación, no construidas, en **[`higgsfield-metricool-preparacion.md`](./higgsfield-metricool-preparacion.md)**.
+
 ## Ponerlo en línea (para que un cliente lo use desde cualquier lado)
 
 No necesita nada especial — es un servidor Node común. Opciones simples, sin Docker:
@@ -88,14 +102,23 @@ Después, la página de venta en Systeme.io (Módulo 04) puede enlazar o embeber
 ## Archivos
 
 ```
-server.js             → el servidor (rutas /health, /chat y /internal/daily-ingest, elige el conocimiento, llama a Claude)
+server.js             → el servidor (rutas /health, /chat, /internal/daily-ingest, /internal/daily-script, /internal/daily-media, /webhook/higgsfield-listo; elige el conocimiento, llama a Claude)
 daily-ingest.js        → implementación real de la lectura diaria — lee Dropbox, clasifica con la API de Claude, actualiza knowledge/
 .github/workflows/daily-ingest.yml → dispara daily-ingest.js una vez por día, gratis, vía GitHub Actions
+daily-script.js         → implementación real del guion diario (Módulo 03) — escribe el guion de reel/carrusel/podcast, lo sube a Dropbox
+.github/workflows/daily-script.yml → dispara daily-script.js una vez por día, gratis, vía GitHub Actions
+daily-media.js           → implementación real del video diario (Módulo 03) — le pide un clip corto a Higgsfield, lo sube a Dropbox cuando avisa que terminó
+.github/workflows/daily-media.yml → dispara daily-media.js una vez por día, gratis, vía GitHub Actions
 sync-dropbox.js        → baja los archivos de conocimiento desde Dropbox
 push-dropbox.js        → sube los archivos de conocimiento a Dropbox (tras la lectura diaria)
 daily-ingest.md         → cómo funciona la lectura diaria, en detalle (complementa a daily-ingest.js)
+daily-script.md         → cómo funciona el guion diario, en detalle (complementa a daily-script.js)
+daily-media.md           → cómo funciona el video diario, en detalle (complementa a daily-media.js)
+higgsfield-metricool-preparacion.md → lo que falta de Metricool y del armado final del Módulo 03, investigado pero no construido todavía
 processed-files.json    → manifiesto de qué archivos de alimentación ya se procesaron
+content-history.json    → historial de guiones generados, para no repetir ángulo/tema (se crea solo)
 knowledge/               → un archivo por categoría + reglas.md (se actualiza solo con la lectura diaria)
+contenido/               → guiones y clips generados por día (se crea solo, se sincroniza con Dropbox)
 guide-catalog.md         → especificación de la generación del catálogo de guías (para Claude Code, no un script)
 public/index.html       → la interfaz de chat que ve el cliente
 .env.example             → plantilla de variables de entorno

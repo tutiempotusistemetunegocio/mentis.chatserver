@@ -461,6 +461,56 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Video del guion diario (Módulo 03 → daily-media.js, Higgsfield). Mismo
+  // patrón de disparo externo que daily-ingest y daily-script, pero acá el
+  // trabajo real llega después por webhook (Higgsfield es asíncrono) — ver
+  // el comentario largo al principio de daily-media.js.
+  if (req.method === 'POST' && req.url === '/internal/daily-media') {
+    const expected = process.env.MEDIA_SECRET;
+    const got = req.headers['x-media-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'MEDIA_SECRET no está configurado — la generación de video está desactivada hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runDailyMedia } = require('./daily-media');
+    const webhookBaseUrl = `https://${req.headers.host}`;
+    runDailyMedia(webhookBaseUrl)
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error pidiendo el clip diario a Higgsfield:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  // Aviso de Higgsfield cuando el clip terminó (o falló). Higgsfield no
+  // manda headers propios, así que el secreto y la fecha viajan como
+  // segmentos de la propia URL — ver daily-media.js para el detalle.
+  if (req.method === 'POST' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/webhook/higgsfield-listo/')) {
+    const parts = req.url.split('?')[0].replace(/\/+$/, '').split('/').filter(Boolean);
+    // parts = ['webhook', 'higgsfield-listo', '<secreto>', '<fecha>']
+    const urlSecret = parts[2] || null;
+    const dateStr = parts[3] || null;
+    const expected = process.env.HIGGSFIELD_WEBHOOK_SECRET;
+    if (!expected) return sendJSON(res, 501, { error: 'HIGGSFIELD_WEBHOOK_SECRET no está configurado.' });
+    if (urlSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    if (!dateStr) return sendJSON(res, 400, { error: 'Falta la fecha en la URL del webhook.' });
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON inválido.' }); }
+      // eslint-disable-next-line global-require
+      const { handleHiggsfieldWebhook } = require('./daily-media');
+      handleHiggsfieldWebhook(dateStr, parsed)
+        .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+        .catch((err) => {
+          console.error('Error guardando el clip de Higgsfield:', err.message);
+          sendJSON(res, 500, { ok: false, error: err.message });
+        });
+    });
+    return;
+  }
+
   // Acepta tanto /webhook/systeme-premium (secreto por header, para probar
   // con curl) como /webhook/systeme-premium/<secreto> (para pegar en
   // Systeme.io, que no permite headers propios) — mismo para -panel.
