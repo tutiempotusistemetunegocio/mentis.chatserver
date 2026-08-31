@@ -442,6 +442,25 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Guion diario (Módulo 03 → daily-script.js/daily-script.md). Mismo patrón
+  // que la lectura diaria: corre adentro de este mismo servicio, reutiliza
+  // las claves ya cargadas, y queda cerrada sin SCRIPT_SECRET configurado.
+  if (req.method === 'POST' && req.url === '/internal/daily-script') {
+    const expected = process.env.SCRIPT_SECRET;
+    const got = req.headers['x-script-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'SCRIPT_SECRET no está configurado — el guion diario está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runDailyScript } = require('./daily-script');
+    runDailyScript()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error generando el guion diario:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   // Acepta tanto /webhook/systeme-premium (secreto por header, para probar
   // con curl) como /webhook/systeme-premium/<secreto> (para pegar en
   // Systeme.io, que no permite headers propios) — mismo para -panel.
