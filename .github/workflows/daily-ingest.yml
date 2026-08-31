@@ -1,0 +1,40 @@
+name: Lectura diaria de Mentis
+
+# Dispara la lectura diaria (Módulo 01 → conocimiento) una vez al día,
+# llamando al servidor ya desplegado en Render. No corre nada acá adentro —
+# solo hace un POST protegido con un secreto, el trabajo real (leer Dropbox,
+# clasificar con la API de Claude, actualizar el conocimiento) pasa en el
+# servidor. Así el secreto de Dropbox y la clave de la API nunca salen de
+# Render.
+#
+# Configuración necesaria, una sola vez, en GitHub:
+#  Settings → Secrets and variables → Actions → New repository secret
+#   - MENTIS_INGEST_URL: la URL completa, por ejemplo
+#     https://mentis-chatserver.onrender.com/internal/daily-ingest
+#   - MENTIS_INGEST_SECRET: el mismo valor que INGEST_SECRET en Render
+
+on:
+  schedule:
+    # 10:00 UTC todos los días — ajustable. Corre antes de la generación de
+    # contenido de las 7am hora de Rodrigo (Módulo 03), para que el guion del
+    # día ya cuente con cualquier libro subido el día anterior.
+    - cron: '0 10 * * *'
+  workflow_dispatch: {} # permite dispararla a mano desde la pestaña "Actions" de GitHub, para probar
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disparar la lectura diaria
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.MENTIS_INGEST_URL }}" \
+            -H "x-ingest-secret: ${{ secrets.MENTIS_INGEST_SECRET }}" \
+            -H "content-type: application/json")
+          body=$(echo "$response" | head -n -1)
+          code=$(echo "$response" | tail -n 1)
+          echo "HTTP $code"
+          echo "$body"
+          if [ "$code" -ge 400 ]; then
+            echo "La lectura diaria falló — revisá el mensaje de arriba."
+            exit 1
+          fi
