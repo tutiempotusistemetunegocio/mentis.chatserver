@@ -50,15 +50,31 @@ Igual que la lectura diaria, la generación del catálogo de guías (Módulo 02 
 
 `knowledge/` tiene 18 archivos (`reglas.md` + un archivo por categoría) para que el servidor funcione desde ya. En producción, estos archivos se sincronizan desde Dropbox — la misma carpeta que Claude Code (corriendo en la nube como tarea programada, nunca instalado en ninguna computadora) actualiza cuando reescribe las reglas (Módulo 07), cuando corre la lectura diaria de la carpeta de alimentación (ver `daily-ingest.md`, más abajo), o cuando genera el catálogo de guías (ver `guide-catalog.md`).
 
-Para conectar Dropbox:
+### Conectar Dropbox (con renovación automática)
+
+Primera vez, la app de Dropbox:
 
 1. Creá una app en [dropbox.com/developers/apps](https://www.dropbox.com/developers/apps) → **Scoped access** → **App folder** (así la app solo ve una carpeta, no todo tu Dropbox).
-2. En la pestaña **Permissions**, activá `files.metadata.read` y `files.content.read`.
-3. En la pestaña **Settings**, generá un access token y pegalo en `DROPBOX_ACCESS_TOKEN` dentro de `.env`.
-4. Corré `npm run sync-knowledge` (o `node sync-dropbox.js`) para bajar los archivos.
-5. Programalo como tarea periódica (cron) después de cada actualización de reglas, para que el chat de clientes nunca hable con una versión vieja de Mentis.
+2. En la pestaña **Permissions**, activá `files.metadata.read`, `files.content.read` y `files.content.write` (esta última hace falta para que el servidor pueda subir, no solo bajar).
+3. En la pestaña **Settings**, anotá el **App key** y el **App secret** — van a `DROPBOX_APP_KEY` y `DROPBOX_APP_SECRET` en `.env` / Render.
 
-Para que este servidor *suba* cambios (no solo bajarlos) — por ejemplo después de la lectura diaria — habilitá también `files.content.write` en la app de Dropbox y corré `node push-dropbox.js`.
+Ahora el refresh token — es un valor que se pide **una sola vez**, no vence nunca, y es lo que le permite al servidor renovarse el access token solo (el botón simple "Generate access token" de la pestaña Settings da un token que vence a las 4 horas — no sirve para producción, lo evitamos a propósito):
+
+4. Con el App key del paso 3, armá esta URL (reemplazando `TU_APP_KEY`) y abrila en el navegador:
+   ```
+   https://www.dropbox.com/oauth2/authorize?client_id=TU_APP_KEY&response_type=code&token_access_type=offline
+   ```
+5. Autorizá el acceso. Dropbox te va a mostrar un **código corto** en la pantalla (no un link, no un archivo — un texto para copiar).
+6. Con ese código, el App key y el App secret, hay que hacer un pedido a Dropbox para cambiarlo por el refresh token de verdad. La forma más simple es pedírmelo a mí en el chat con los tres valores — lo hago con un comando y te devuelvo el `refresh_token` para pegar en `.env`/Render. (Si preferís hacerlo vos mismo desde una terminal: `curl https://api.dropboxapi.com/oauth2/token -d code=EL_CODIGO -d grant_type=authorization_code -d client_id=TU_APP_KEY -d client_secret=TU_APP_SECRET` — la respuesta trae `refresh_token`.)
+7. Pegá `DROPBOX_REFRESH_TOKEN`, `DROPBOX_APP_KEY` y `DROPBOX_APP_SECRET` en `.env` (local) y en Render (producción).
+
+Con esas tres variables cargadas, `dropbox-auth.js` le pide un access token nuevo a Dropbox automáticamente cada vez que hace falta (y lo cachea en memoria hasta que esté por vencer) — nadie tiene que volver a generar ni pegar nada a mano nunca más. Si por algún motivo todavía no cargaste las tres, el servidor sigue aceptando `DROPBOX_ACCESS_TOKEN` directo como antes (puente de retrocompatibilidad), pero ese modo vuelve a vencer cada 4 horas.
+
+Una vez conectado:
+
+- Corré `npm run sync-knowledge` (o `node sync-dropbox.js`) para bajar los archivos de conocimiento.
+- Corré `node push-dropbox.js` para subir cambios locales (por ejemplo después de la lectura diaria).
+- Programá `sync-dropbox.js` como tarea periódica después de cada actualización de reglas, para que el chat de clientes nunca hable con una versión vieja de Mentis.
 
 ## Lectura diaria de la carpeta de alimentación
 
@@ -117,6 +133,7 @@ daily-media.js           → implementación real del video diario (Módulo 03) 
 .github/workflows/daily-media.yml → dispara daily-media.js una vez por día, gratis, vía GitHub Actions
 daily-photo.js           → implementación real de la carpeta de medios (Módulo 03) — elige, entre las fotos de Dropbox, cuál acompaña el reel de hoy
 .github/workflows/daily-photo.yml → dispara daily-photo.js una vez por día, gratis, vía GitHub Actions
+dropbox-auth.js         → renueva el access token de Dropbox solo (refresh token) — lo usan todos los módulos de arriba, ver "Conectar Dropbox" más abajo
 sync-dropbox.js        → baja los archivos de conocimiento desde Dropbox
 push-dropbox.js        → sube los archivos de conocimiento a Dropbox (tras la lectura diaria)
 daily-ingest.md         → cómo funciona la lectura diaria, en detalle (complementa a daily-ingest.js)

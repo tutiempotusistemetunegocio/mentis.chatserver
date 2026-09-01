@@ -51,6 +51,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getDropboxAccessToken } = require('./dropbox-auth');
 
 const CONTENT_DIR = path.join(__dirname, 'contenido');
 const HISTORY_PATH = path.join(__dirname, 'content-history.json');
@@ -140,11 +141,15 @@ async function submitHiggsfieldClip(prompt, webhookUrl) {
 // server.js a partir del secreto configurado, para no hardcodear el
 // dominio acá.
 async function runDailyMedia(webhookBaseUrl) {
-  const dropboxToken = process.env.DROPBOX_ACCESS_TOKEN;
   const webhookSecret = process.env.HIGGSFIELD_WEBHOOK_SECRET;
-  if (!dropboxToken) return { ok: false, error: 'Falta DROPBOX_ACCESS_TOKEN en las variables de entorno.' };
   if (!higgsfieldAuthHeader()) return { ok: false, error: 'Falta HIGGSFIELD_KEY_ID o HIGGSFIELD_KEY_SECRET en las variables de entorno.' };
   if (!webhookSecret) return { ok: false, error: 'Falta HIGGSFIELD_WEBHOOK_SECRET en las variables de entorno.' };
+  let dropboxToken;
+  try {
+    dropboxToken = await getDropboxAccessToken();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 
   // A diferencia de daily-script.js, esto NO necesita el conocimiento
   // (knowledge/) para nada — solo el ángulo ya guardado en el historial. Se
@@ -175,8 +180,12 @@ async function runDailyMedia(webhookBaseUrl) {
 // Paso 2: llamado desde server.js cuando Higgsfield avisa que el clip
 // terminó (o falló). dateStr viene de la propia URL del webhook.
 async function handleHiggsfieldWebhook(dateStr, payload) {
-  const dropboxToken = process.env.DROPBOX_ACCESS_TOKEN;
-  if (!dropboxToken) return { ok: false, error: 'Falta DROPBOX_ACCESS_TOKEN en las variables de entorno.' };
+  let dropboxToken;
+  try {
+    dropboxToken = await getDropboxAccessToken();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 
   if (payload.status !== 'completed') {
     return { ok: true, saved: false, date: dateStr, status: payload.status, error: payload.error || null };

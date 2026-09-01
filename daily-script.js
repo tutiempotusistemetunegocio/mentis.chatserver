@@ -37,6 +37,7 @@
 const fs = require('fs');
 const path = require('path');
 const { syncFromDropbox } = require('./sync-dropbox');
+const { getDropboxAccessToken } = require('./dropbox-auth');
 
 const KNOWLEDGE_DIR = path.join(__dirname, 'knowledge');
 const CONTENT_DIR = path.join(__dirname, 'contenido');
@@ -173,10 +174,14 @@ ${fullKnowledgeSnapshot()}`;
 }
 
 async function runDailyScript() {
-  const dropboxToken = process.env.DROPBOX_ACCESS_TOKEN;
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!dropboxToken) return { ok: false, error: 'Falta DROPBOX_ACCESS_TOKEN en las variables de entorno.' };
   if (!apiKey) return { ok: false, error: 'Falta ANTHROPIC_API_KEY en las variables de entorno.' };
+  let dropboxToken;
+  try {
+    dropboxToken = await getDropboxAccessToken();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 
   await syncFromDropbox(); // conocimiento fresco antes de escribir el guion
   try {

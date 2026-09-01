@@ -27,6 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const { syncFromDropbox } = require('./sync-dropbox');
+const { getDropboxAccessToken } = require('./dropbox-auth');
 const { pushToDropbox } = require('./push-dropbox');
 
 const KNOWLEDGE_DIR = path.join(__dirname, 'knowledge');
@@ -210,10 +211,14 @@ function applyResult(result) {
 }
 
 async function runDailyIngest() {
-  const dropboxToken = process.env.DROPBOX_ACCESS_TOKEN;
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!dropboxToken) return { ok: false, error: 'Falta DROPBOX_ACCESS_TOKEN en las variables de entorno.' };
   if (!apiKey) return { ok: false, error: 'Falta ANTHROPIC_API_KEY en las variables de entorno.' };
+  let dropboxToken;
+  try {
+    dropboxToken = await getDropboxAccessToken();
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 
   // 1. Traer la versión más reciente desde Dropbox antes de tocar nada local
   //    — el disco de Render no está garantizado entre reinicios.

@@ -7,6 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { getDropboxAccessToken } = require('./dropbox-auth');
 
 function loadEnv() {
   const envPath = path.join(__dirname, '.env');
@@ -28,9 +29,11 @@ const KNOWLEDGE_DIR = path.join(__dirname, 'knowledge');
 const DROPBOX_FOLDER = process.env.DROPBOX_KNOWLEDGE_FOLDER || '/mentis-reglas';
 
 async function pushToDropbox() {
-  const token = process.env.DROPBOX_ACCESS_TOKEN;
-  if (!token) {
-    console.log('DROPBOX_ACCESS_TOKEN no está configurado — no hay a dónde subir todavía.');
+  let token;
+  try {
+    token = await getDropboxAccessToken();
+  } catch (err) {
+    console.log(`No se pudo obtener el access token de Dropbox: ${err.message}`);
     return;
   }
 
