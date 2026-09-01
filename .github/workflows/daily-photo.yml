@@ -1,0 +1,20 @@
+name: Foto diaria de Mentis
+
+on:
+  schedule:
+    - cron: '40 10 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  elegir-foto:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar al endpoint de foto diaria
+        run: |
+          HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" -X POST "${{ secrets.MENTIS_PHOTO_URL }}" -H "x-photo-secret: ${{ secrets.MENTIS_PHOTO_SECRET }}")
+          echo "HTTP status: $HTTP_CODE"
+          cat response.json
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "Fallo la llamada"
+            exit 1
+          fi
