@@ -77,7 +77,16 @@ const HIGGSFIELD_API_BASE = 'https://api.higgsfield.ai';
 // disparar /internal/daily-media a mano una vez (o esperar al próximo 10:45
 // UTC) y confirmar que ya no da 404 antes de darlo por resuelto del todo.
 const HIGGSFIELD_MODEL_PATH = '/bytedance/seedance/v1/pro/fast/text-to-video';
-const CLIP_DURATION_SECONDS = 10;
+// Rodrigo pidió (2/9/2026) que los clips tengan 25s. No es posible: la
+// documentación pública de la API de Higgsfield (revisada de nuevo hoy)
+// dice explícitamente que Seedance acepta `duration` entre 2 y 12 segundos
+// por pedido — es un techo de la plataforma, no algo que se pueda subir
+// desde acá. 12 es el máximo real, así que es el valor que se usa. Para
+// llegar a ~20-25s hace falta pedir dos clips y unirlos en un solo video
+// (edición/concatenación) — eso es una construcción aparte, todavía no
+// existe, ver daily-media.md.
+const CLIP_DURATION_SECONDS = 12;
+const VIDEO_HISTORY_PATH = path.join(__dirname, 'video-history.json');
 
 // Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
 // 2/9/2026): sin límite propio, una llamada colgada dejaba la corrida
@@ -136,8 +145,41 @@ function higgsfieldAuthHeader() {
   return `Key ${keyId}:${keySecret}`;
 }
 
+// Reforzado (2/9/2026, pedido explícito de Rodrigo): siempre cinematográfico
+// — se lo dice más de una vez al modelo, con vocabulario concreto de cámara
+// (movimiento, lente, iluminación) en vez de solo la palabra "cinematic"
+// suelta, que es más fácil de ignorar. "Silent" explícito porque el clip se
+// usa sin narración (el guion en texto ya existe aparte) — Seedance no
+// agrega diálogo si no se le da audio de entrada, pero decirlo ayuda a que
+// tampoco intente sumar ambiente sonoro con gente hablando de fondo.
+//
+// Pedido explícito de Rodrigo (2/9/2026): que "el cerebro" (Mentis, al armar
+// el guion del día en daily-script.js) ya sepa de antemano que el clip real
+// dura como máximo 12 segundos, y condense el gancho en UNA escena concreta
+// pensada para eso — en vez de que acá se agarre el ángulo corto (pensado
+// como etiqueta del guion narrado de 30-60s) y se lo estire como si fuera
+// una escena filmable. Por eso ahora se usa `entry.escenaVisual` (ya escrita
+// en inglés por Mentis, pensada específicamente para 12s) cuando existe.
+// `entry.angulo` queda como respaldo solo para entradas viejas, generadas
+// antes de este cambio, que no tienen escenaVisual guardada.
 function buildVisualPrompt(entry) {
-  return `Cinematic vertical short clip for a social media reel. Visual hook for the theme: "${entry.angulo}". Realistic, professional, high-energy footage suitable as an opening shot — no on-screen text, no logos, no watermarks.`;
+  const escena = entry.escenaVisual || `Visual hook for the theme: "${entry.angulo}".`;
+  return `Cinematic, high-production-value vertical video for a social media reel — think film-grade cinematography: deliberate camera movement (slow push-in, tracking, or handheld with purpose), dramatic natural lighting, shallow depth of field. ${escena} Realistic, professional, high-energy footage suitable as a single 12-second shot. Silent footage, no dialogue, no voiceover, no on-screen text, no logos, no watermarks.`;
+}
+
+function loadVideoHistory() {
+  if (!fs.existsSync(VIDEO_HISTORY_PATH)) return { entries: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(VIDEO_HISTORY_PATH, 'utf-8'));
+    if (!Array.isArray(parsed.entries)) parsed.entries = [];
+    return parsed;
+  } catch {
+    return { entries: [] };
+  }
+}
+
+function saveVideoHistory(history) {
+  fs.writeFileSync(VIDEO_HISTORY_PATH, JSON.stringify(history, null, 2));
 }
 
 async function submitHiggsfieldClip(prompt, webhookUrl) {
@@ -197,7 +239,26 @@ async function runDailyMedia(webhookBaseUrl) {
   const webhookUrl = `${webhookBaseUrl.replace(/\/+$/, '')}/webhook/higgsfield-listo/${webhookSecret}/${dateStr}`;
   const job = await submitHiggsfieldClip(prompt, webhookUrl);
 
-  return { ok: true, submitted: true, date: dateStr, angulo: todayEntry.angulo, requestId: job.request_id, status: job.status };
+  // Pedido explícito de Rodrigo (2/9/2026): "no veo el prompt del video".
+  // Antes esto se armaba y se mandaba a Higgsfield sin dejar rastro en
+  // ningún lado — se guarda acá para que quede visible en el panel personal
+  // (Módulo 08), igual que ya pasa con el catálogo de guías y el contenido
+  // de texto. Si esto falla, no tiene que tirar abajo el pedido que ya se
+  // mandó — el video se genera igual, solo no queda registrado el prompt.
+  try {
+    const videoHistory = loadVideoHistory();
+    videoHistory.entries.push({
+      date: dateStr, angulo: todayEntry.angulo, prompt, duration: CLIP_DURATION_SECONDS,
+      requestId: job.request_id, status: job.status, submittedAt: new Date().toISOString(),
+    });
+    saveVideoHistory(videoHistory);
+    const dropboxToken2 = await getDropboxAccessToken();
+    await dropboxUpload(dropboxToken2, `${CONTENT_FOLDER}/video-history.json`, fs.readFileSync(VIDEO_HISTORY_PATH));
+  } catch (err) {
+    console.error('No se pudo guardar el historial de prompts de video (el pedido a Higgsfield sí se mandó):', err.message);
+  }
+
+  return { ok: true, submitted: true, date: dateStr, angulo: todayEntry.angulo, prompt, requestId: job.request_id, status: job.status };
 }
 
 // Paso 2: llamado desde server.js cuando Higgsfield avisa que el clip

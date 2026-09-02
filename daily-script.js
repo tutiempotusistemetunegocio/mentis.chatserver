@@ -154,8 +154,10 @@ ${recentAngles}
 
 Basate en todo el conocimiento cargado más abajo — combiná lo que haga falta (marketing, mentalidad, ventas, redes, lo que aplique), como lo haría alguien que domina todas esas áreas a la vez.
 
+Además del guion completo (pensado para narrarse en 30-60s), describí por separado una escena visual para el clip de video que se genera con IA a partir de esto: ese clip dura como máximo 12 segundos y es mudo (sin narración, sin diálogo, sin texto en pantalla), así que tiene que ser a propósito UN SOLO momento o toma concreta — nunca una secuencia de varias escenas ni algo que necesite más de 12 segundos para leerse o tener sentido. Condensá el gancho central de hoy en esa única imagen. Escribila directamente en inglés, lista para usarse tal cual como prompt de generación de video (describí solo lo que la cámara ve — acción, ambiente, iluminación — nunca diálogo ni texto en pantalla).
+
 Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
-{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<call to action del final, ej. invitar a comentar la palabra clave>"}
+{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "escenaVisual": "<en inglés, la escena única de hasta 12s descripta arriba>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<call to action del final, ej. invitar a comentar la palabra clave>"}
 
 --- CONOCIMIENTO DE MENTIS ---
 ${fullKnowledgeSnapshot()}`;
@@ -224,7 +226,7 @@ async function runDailyScript() {
       const fname = `${dateStr}-${reel.formato === 'carrusel' ? 'carrusel' : 'reel'}.md`;
       const body = `# ${dateStr} — ${reel.formato}\n\n**Ángulo:** ${reel.angulo}\n\n---\n\n${reel.guion}\n\n---\n\n**CTA:** ${reel.cta}\n`;
       fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
-      history.entries.push({ date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo });
+      history.entries.push({ date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo, escenaVisual: reel.escenaVisual || null });
       generated.push(fname);
     } catch (err) {
       failures.push({ tipo: 'reel', error: err.message });
