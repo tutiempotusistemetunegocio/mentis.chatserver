@@ -11,7 +11,16 @@ jobs:
     steps:
       - name: Llamar al endpoint de foto diaria
         run: |
-          HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" -X POST "${{ secrets.MENTIS_PHOTO_URL }}" -H "x-photo-secret: ${{ secrets.MENTIS_PHOTO_SECRET }}")
+          # --max-time (afinado 2/9/2026): mismo motivo que los otros tres
+          # workflows — evita quedarse esperando en silencio si el servidor se
+          # cuelga. 3 minutos alcanza (hasta 3 fotos nuevas por corrida, cada
+          # una con su propio límite interno más corto).
+          HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" --max-time 180 -X POST "${{ secrets.MENTIS_PHOTO_URL }}" -H "x-photo-secret: ${{ secrets.MENTIS_PHOTO_SECRET }}")
+          curl_exit=$?
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "Fallo la llamada — no hubo respuesta del servidor a tiempo (curl exit $curl_exit, probablemente un timeout)."
+            exit 1
+          fi
           echo "HTTP status: $HTTP_CODE"
           cat response.json
           if [ "$HTTP_CODE" -ge 400 ]; then

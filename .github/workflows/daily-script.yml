@@ -1,20 +1,47 @@
 name: Guion diario de Mentis
 
+# Dispara el guion diario (Módulo 03 → daily-script.js) una vez al día,
+# llamando al servidor ya desplegado en Render — mismo patrón que
+# daily-ingest.yml. Corre 30 minutos después de la lectura diaria, para que
+# el guion de hoy ya cuente con cualquier libro subido y procesado esa misma
+# mañana.
+#
+# Configuración necesaria, una sola vez, en GitHub:
+#  Settings → Secrets and variables → Actions → New repository secret
+#   - MENTIS_SCRIPT_URL: la URL completa, por ejemplo
+#     https://mentis-chatserver.onrender.com/internal/daily-script
+#   - MENTIS_SCRIPT_SECRET: el mismo valor que SCRIPT_SECRET en Render
+
 on:
   schedule:
+    # 10:30 UTC — 30 min después de la lectura diaria (10:00 UTC), y todavía
+    # antes de las 7am hora de Rodrigo.
     - cron: '30 10 * * *'
-  workflow_dispatch: {}
+  workflow_dispatch: {} # permite dispararlo a mano desde la pestaña "Actions" de GitHub, para probar
 
 jobs:
-  generar-guion:
+  script:
     runs-on: ubuntu-latest
     steps:
-      - name: Llamar al endpoint de guion diario
+      - name: Generar el guion de hoy
         run: |
-          HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" -X POST "${{ secrets.MENTIS_SCRIPT_URL }}" -H "x-script-secret: ${{ secrets.MENTIS_SCRIPT_SECRET }}")
-          echo "HTTP status: $HTTP_CODE"
-          cat response.json
-          if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "Fallo la llamada"
+          # --max-time (afinado 2/9/2026, auditoría de confiabilidad): mismo
+          # motivo que daily-ingest.yml — evita quedarse esperando en silencio
+          # si el servidor se cuelga. 3 minutos alcanza (reel + podcast, cada
+          # uno con su propio límite interno más corto).
+          response=$(curl -s -w "\n%{http_code}" --max-time 180 -X POST "${{ secrets.MENTIS_SCRIPT_URL }}" \
+            -H "x-script-secret: ${{ secrets.MENTIS_SCRIPT_SECRET }}" \
+            -H "content-type: application/json")
+          curl_exit=$?
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "El guion diario falló — no hubo respuesta del servidor a tiempo (curl exit $curl_exit, probablemente un timeout)."
+            exit 1
+          fi
+          body=$(echo "$response" | head -n -1)
+          code=$(echo "$response" | tail -n 1)
+          echo "HTTP $code"
+          echo "$body"
+          if [ "$code" -ge 400 ]; then
+            echo "El guion diario falló — revisá el mensaje de arriba."
             exit 1
           fi

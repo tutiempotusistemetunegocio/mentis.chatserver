@@ -27,9 +27,19 @@ jobs:
     steps:
       - name: Disparar la lectura diaria
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.MENTIS_INGEST_URL }}" \
+          # --max-time (afinado 2/9/2026, auditoría de confiabilidad): sin esto,
+          # si el servidor se cuelga en vez de responder, este paso se queda
+          # esperando en silencio en vez de fallar limpio y avisar. 4 minutos
+          # alcanza de sobra: son hasta 3 documentos por corrida, y cada uno ya
+          # tiene su propio límite interno más corto (ver dropbox-auth.js).
+          response=$(curl -s -w "\n%{http_code}" --max-time 240 -X POST "${{ secrets.MENTIS_INGEST_URL }}" \
             -H "x-ingest-secret: ${{ secrets.MENTIS_INGEST_SECRET }}" \
             -H "content-type: application/json")
+          curl_exit=$?
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "La lectura diaria falló — no hubo respuesta del servidor a tiempo (curl exit $curl_exit, probablemente un timeout)."
+            exit 1
+          fi
           body=$(echo "$response" | head -n -1)
           code=$(echo "$response" | tail -n 1)
           echo "HTTP $code"
