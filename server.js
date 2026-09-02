@@ -532,6 +532,63 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Catálogo de guías (Módulo 02 → weekly-guides.js) — arma hasta
+  // GUIDES_PER_RUN_FREE gratis + GUIDES_PER_RUN_PREMIUM premium por corrida,
+  // cruzando 2+ categorías de conocimiento. Mismo patrón de secreto que el
+  // resto de las rutas /internal/*, disparada semanalmente por GitHub
+  // Actions (ver weekly-guides.yml) — o a mano, varias veces seguidas, para
+  // juntar rápido las primeras 20 (mismo truco que ya se usó con la lectura
+  // diaria y el backlog de libros).
+  if (req.method === 'POST' && req.url === '/internal/weekly-guides') {
+    const expected = process.env.GUIDES_SECRET;
+    const got = req.headers['x-guides-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'GUIDES_SECRET no está configurado — el catálogo de guías está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runWeeklyGuides } = require('./weekly-guides');
+    runWeeklyGuides()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error armando el catálogo de guías:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  // Panel personal de Rodrigo (Módulo 08 → panel.js) — a diferencia de las
+  // rutas /internal/*, esta la abre él mismo desde el navegador, así que el
+  // secreto viaja como segmento de la URL (igual que el webhook de
+  // Higgsfield) en vez de un header. Sin PANEL_SECRET configurado, las dos
+  // rutas quedan cerradas — devuelven 404 en vez de revelar que existen.
+  if (req.method === 'GET' && req.url.startsWith('/panel/')) {
+    const expected = process.env.PANEL_SECRET;
+    const parts = req.url.split('?')[0].split('/').filter(Boolean); // ['panel', '<secreto>', 'guia'?, '<id>'?]
+    const urlSecret = parts[1] || null;
+    if (!expected || !urlSecret || urlSecret !== expected) { res.writeHead(404); return res.end('No encontrado'); }
+    // eslint-disable-next-line global-require
+    const { renderPanel, renderGuideContent } = require('./panel');
+    if (parts[2] === 'guia' && parts[3]) {
+      renderGuideContent(urlSecret, decodeURIComponent(parts[3]))
+        .then((text) => {
+          if (text === null) { res.writeHead(404); return res.end('Guía no encontrada.'); }
+          res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end(text);
+        })
+        .catch((err) => {
+          console.error('Error leyendo una guía del panel:', err.message);
+          res.writeHead(500); res.end('No se pudo leer la guía: ' + err.message);
+        });
+      return;
+    }
+    renderPanel(urlSecret)
+      .then((html) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(html); })
+      .catch((err) => {
+        console.error('Error armando el panel personal:', err.message);
+        res.writeHead(500); res.end('No se pudo armar el panel: ' + err.message);
+      });
+    return;
+  }
+
   // Acepta tanto /webhook/systeme-premium (secreto por header, para probar
   // con curl) como /webhook/systeme-premium/<secreto> (para pegar en
   // Systeme.io, que no permite headers propios) — mismo para -panel.
