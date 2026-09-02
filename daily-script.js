@@ -48,10 +48,17 @@ const PODCAST_EVERY_N_DAYS = 3;
 const WEEKDAYS_ONLY = true; // ver nota arriba — fácil de cambiar a 7 días
 const HISTORY_LOOKBACK = 8; // cuántas entradas recientes se le muestran a Mentis para no repetir ángulo
 
+// Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
+// 2/9/2026): sin límite propio, una llamada colgada a Dropbox o a Claude
+// dejaba la corrida esperando sin límite en vez de fallar limpio.
+const FETCH_TIMEOUT_MS = 20000;
+const GENERATE_TIMEOUT_MS = 90000; // escribir un guion completo tarda más que un llamado corto
+
 async function dropboxDownload(token, dropboxPath) {
   const res = await fetch('https://content.dropboxapi.com/2/files/download', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath }) },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} descargando ${dropboxPath}`);
   return Buffer.from(await res.arrayBuffer());
@@ -66,6 +73,7 @@ async function dropboxUpload(token, dropboxPath, buffer) {
       'Content-Type': 'application/octet-stream',
     },
     body: buffer,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} subiendo ${dropboxPath}`);
 }
@@ -119,6 +127,7 @@ async function callMentis(prompt, maxTokens) {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+    signal: AbortSignal.timeout(GENERATE_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status} generando contenido`);
@@ -196,29 +205,46 @@ async function runDailyScript() {
   const wIdx = weekdayIndex(dateStr);
   const generated = [];
   let skippedReel = null;
+  let podcastGenerated = false;
+  const failures = [];
 
   if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });
 
+  // Afinado el 2/9/2026 (auditoría de confiabilidad): antes, reel/carrusel y
+  // podcast se generaban uno atrás del otro sin try/catch propio — si el
+  // segundo fallaba (por ejemplo el podcast), toda la función tiraba error
+  // ANTES de llegar al bloque que sube a Dropbox, así que el primero (el
+  // reel, ya generado y ya pagado como llamada a la API) se perdía sin
+  // guardarse ni avisar que había salido bien. Ahora cada uno se genera con
+  // su propio try/catch: si uno falla, el otro igual se guarda, y la
+  // respuesta cuenta cuál falló y por qué en vez de perder todo en silencio.
   if (wIdx !== null || !WEEKDAYS_ONLY) {
-    const reel = await generateReelScript(dateStr, wIdx, history);
-    const fname = `${dateStr}-${reel.formato === 'carrusel' ? 'carrusel' : 'reel'}.md`;
-    const body = `# ${dateStr} — ${reel.formato}\n\n**Ángulo:** ${reel.angulo}\n\n---\n\n${reel.guion}\n\n---\n\n**CTA:** ${reel.cta}\n`;
-    fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
-    history.entries.push({ date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo });
-    generated.push(fname);
+    try {
+      const reel = await generateReelScript(dateStr, wIdx, history);
+      const fname = `${dateStr}-${reel.formato === 'carrusel' ? 'carrusel' : 'reel'}.md`;
+      const body = `# ${dateStr} — ${reel.formato}\n\n**Ángulo:** ${reel.angulo}\n\n---\n\n${reel.guion}\n\n---\n\n**CTA:** ${reel.cta}\n`;
+      fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
+      history.entries.push({ date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo });
+      generated.push(fname);
+    } catch (err) {
+      failures.push({ tipo: 'reel', error: err.message });
+    }
   } else {
     skippedReel = 'fin de semana — no se genera reel/carrusel (ver WEEKDAYS_ONLY en daily-script.js)';
   }
 
-  let podcastGenerated = false;
   if (daysSinceEpoch(dateStr) % PODCAST_EVERY_N_DAYS === 0) {
-    const podcast = await generatePodcastScript(dateStr, history);
-    const fname = `${dateStr}-podcast.md`;
-    const body = `# ${dateStr} — Podcast\n\n**Tema:** ${podcast.tema}\n\n---\n\n${podcast.guion}\n`;
-    fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
-    history.entries.push({ date: dateStr, tipo: 'podcast', tema: podcast.tema });
-    generated.push(fname);
-    podcastGenerated = true;
+    try {
+      const podcast = await generatePodcastScript(dateStr, history);
+      const fname = `${dateStr}-podcast.md`;
+      const body = `# ${dateStr} — Podcast\n\n**Tema:** ${podcast.tema}\n\n---\n\n${podcast.guion}\n`;
+      fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
+      history.entries.push({ date: dateStr, tipo: 'podcast', tema: podcast.tema });
+      generated.push(fname);
+      podcastGenerated = true;
+    } catch (err) {
+      failures.push({ tipo: 'podcast', error: err.message });
+    }
   }
 
   if (generated.length > 0) {
@@ -230,7 +256,11 @@ async function runDailyScript() {
     await dropboxUpload(dropboxToken, `${CONTENT_FOLDER}/content-history.json`, fs.readFileSync(HISTORY_PATH));
   }
 
-  return { ok: true, date: dateStr, generated, skippedReel, podcastGenerated };
+  // ok:false solo si TODO lo que tocaba generar hoy falló — si al menos uno
+  // salió bien, ok:true con "failures" listando lo que no, para no marcar
+  // como error una corrida parcialmente exitosa.
+  const ok = failures.length === 0 || generated.length > 0;
+  return { ok, date: dateStr, generated, skippedReel, podcastGenerated, failures };
 }
 
 module.exports = { runDailyScript };

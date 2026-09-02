@@ -38,6 +38,14 @@ const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 const MAX_FILES_PER_RUN = parseInt(process.env.INGEST_MAX_FILES_PER_RUN || '3', 10);
 const MAX_CHARS_PER_DOC = 60000; // tope por documento, para acotar tiempo y costo por corrida
 
+// Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
+// 2/9/2026): sin esto, una llamada colgada a Dropbox o a Claude dejaba la
+// corrida esperando sin límite en vez de fallar limpio. Clasificar un
+// documento es lo más lento (puede analizar hasta 60.000 caracteres), por
+// eso tiene su propio límite más generoso.
+const FETCH_TIMEOUT_MS = 20000;
+const CLASSIFY_TIMEOUT_MS = 90000;
+
 // Las 17 categorías con módulo propio (ver "Categorías de libros de la
 // carpeta de alimentación" en el plano — 18 categorías en total, "Fuentes
 // oficiales de algoritmos" no es un libro y vive sintetizada dentro de
@@ -73,6 +81,7 @@ async function dropboxListFolder(token, folderPath) {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ path: folderPath }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error_summary || `HTTP ${res.status} listando ${folderPath || '(raíz)'}`);
@@ -83,6 +92,7 @@ async function dropboxDownload(token, dropboxPath) {
   const res = await fetch('https://content.dropboxapi.com/2/files/download', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath }) },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} descargando ${dropboxPath}`);
   return Buffer.from(await res.arrayBuffer());
@@ -97,6 +107,7 @@ async function dropboxUpload(token, dropboxPath, buffer) {
       'Content-Type': 'application/octet-stream',
     },
     body: buffer,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} subiendo ${dropboxPath}`);
 }
@@ -154,6 +165,7 @@ ${truncated}`;
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: MODEL, max_tokens: 4000, messages: [{ role: 'user', content: prompt }] }),
+    signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status} clasificando ${docName}`);

@@ -576,6 +576,22 @@ const server = http.createServer((req, res) => {
   res.end('No encontrado');
 });
 
+// Red de seguridad de último recurso — afinado el 2/9/2026 (auditoría de
+// confiabilidad de "toda la programación"). Cada ruta /internal/* y
+// /webhook/* ya envuelve su trabajo en .then()/.catch() propio (ver arriba),
+// así que en la práctica esto nunca debería dispararse — pero si algún día
+// aparece un error que se escapa de esos catch (un bug nuevo, una librería
+// que rompe una promesa sin que nadie la espere), esto evita que TODO el
+// servicio se caiga por ese único error, lo cual apagaría de golpe las
+// cuatro tareas diarias y también el chat de los clientes premium. En vez de
+// caerse, lo deja en el log y el proceso sigue vivo.
+process.on('uncaughtException', (err) => {
+  console.error('Error no capturado (el servicio sigue corriendo):', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('Promesa rechazada sin capturar (el servicio sigue corriendo):', err);
+});
+
 server.listen(PORT, () => {
   console.log(`Mentis servido escuchando en http://localhost:${PORT}`);
   console.log(`Modo: ${process.env.ANTHROPIC_API_KEY ? 'live (con API de Claude)' : 'demo (sin API key todavía)'}`);

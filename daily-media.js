@@ -68,10 +68,20 @@ const HIGGSFIELD_API_BASE = 'https://api.higgsfield.ai';
 const HIGGSFIELD_MODEL_PATH = '/bytedance/seedance/v1/lite/text-to-video';
 const CLIP_DURATION_SECONDS = 10;
 
+// Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
+// 2/9/2026): sin límite propio, una llamada colgada dejaba la corrida
+// esperando sin límite en vez de fallar limpio. El pedido a Higgsfield solo
+// tiene que aceptar el trabajo (el video en sí llega después por webhook),
+// así que no necesita un límite largo.
+const FETCH_TIMEOUT_MS = 20000;
+const SUBMIT_TIMEOUT_MS = 30000;
+const VIDEO_DOWNLOAD_TIMEOUT_MS = 60000; // el webhook baja el clip ya terminado, puede pesar más
+
 async function dropboxDownload(token, dropboxPath) {
   const res = await fetch('https://content.dropboxapi.com/2/files/download', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath }) },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} descargando ${dropboxPath}`);
   return Buffer.from(await res.arrayBuffer());
@@ -86,6 +96,7 @@ async function dropboxUpload(token, dropboxPath, buffer) {
       'Content-Type': 'application/octet-stream',
     },
     body: buffer,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} subiendo ${dropboxPath}`);
 }
@@ -130,6 +141,7 @@ async function submitHiggsfieldClip(prompt, webhookUrl) {
       resolution: 1080,
       aspect_ratio: '9:16',
     }),
+    signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status} pidiendo el clip a Higgsfield`);
@@ -196,7 +208,7 @@ async function handleHiggsfieldWebhook(dateStr, payload) {
     return { ok: false, error: 'Higgsfield avisó "completed" pero no vino ninguna URL de video en el payload.' };
   }
 
-  const videoRes = await fetch(videoUrl);
+  const videoRes = await fetch(videoUrl, { signal: AbortSignal.timeout(VIDEO_DOWNLOAD_TIMEOUT_MS) });
   if (!videoRes.ok) throw new Error(`HTTP ${videoRes.status} descargando el clip desde Higgsfield`);
   const buf = Buffer.from(await videoRes.arrayBuffer());
 

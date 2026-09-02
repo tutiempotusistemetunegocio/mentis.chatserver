@@ -25,6 +25,16 @@
 // venía siendo — así nada se rompe de un día para el otro. Pero ese modo
 // sigue venciendo cada 4hs; es solo un puente.
 
+// Afinado el 2/9/2026, parte de la auditoría de confiabilidad de "toda la
+// programación": ninguna llamada a una API externa tenía límite de tiempo
+// propio — si Dropbox o Claude se colgaban en vez de responder con un error,
+// la corrida se quedaba esperando indefinidamente en vez de fallar limpio
+// (esto es justo lo que hace que una corrida se vea "todavía corriendo" en
+// GitHub Actions mucho más de lo normal). AbortSignal.timeout() corta la
+// espera después de este límite y la convierte en un error normal, que ya
+// sabe manejar el resto del código.
+const FETCH_TIMEOUT_MS = 20000;
+
 let cached = { token: null, expiresAt: 0 };
 
 async function getDropboxAccessToken() {
@@ -53,6 +63,7 @@ async function getDropboxAccessToken() {
       client_id: appKey,
       client_secret: appSecret,
     }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) {

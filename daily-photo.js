@@ -69,6 +69,14 @@ const MAX_NEW_PER_RUN = parseInt(process.env.PHOTO_MAX_NEW_PER_RUN || '3', 10);
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024; // ver criterio 4 en el comentario de arriba
 const HISTORY_LOOKBACK = 15; // ver criterio 2
 
+// Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
+// 2/9/2026): sin límite propio, una llamada colgada dejaba la corrida
+// esperando sin límite en vez de fallar limpio (y acá cada foto nueva ya
+// tiene su propio try/catch, así que esto la convierte en un "skipped" del
+// catálogo en vez de trabar toda la corrida).
+const FETCH_TIMEOUT_MS = 20000;
+const CLAUDE_TIMEOUT_MS = 45000; // describir una foto o elegir entre varias
+
 const SUPPORTED_EXT = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
 
 async function dropboxListFolder(token, folderPath) {
@@ -76,6 +84,7 @@ async function dropboxListFolder(token, folderPath) {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ path: folderPath }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) {
@@ -90,6 +99,7 @@ async function dropboxDownload(token, dropboxPath) {
   const res = await fetch('https://content.dropboxapi.com/2/files/download', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath }) },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} descargando ${dropboxPath}`);
   return Buffer.from(await res.arrayBuffer());
@@ -104,6 +114,7 @@ async function dropboxUpload(token, dropboxPath, buffer) {
       'Content-Type': 'application/octet-stream',
     },
     body: buffer,
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} subiendo ${dropboxPath}`);
 }
@@ -137,6 +148,7 @@ async function describePhoto(apiKey, buffer, mediaType) {
         ],
       }],
     }),
+    signal: AbortSignal.timeout(CLAUDE_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status} describiendo la foto`);
@@ -159,6 +171,7 @@ Elegí la que mejor conecta temáticamente con ese ángulo — no hace falta que
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: MODEL, max_tokens: 300, messages: [{ role: 'user', content: prompt }] }),
+    signal: AbortSignal.timeout(CLAUDE_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status} eligiendo la foto`);
