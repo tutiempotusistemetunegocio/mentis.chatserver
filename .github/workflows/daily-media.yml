@@ -1,8 +1,18 @@
 name: Video diario de Mentis
 
+# PENDIENTE DE UNA CONFIRMACIÓN MANUAL (2/9/2026): Rodrigo pasó su cuenta de
+# Higgsfield al plan Plus, que da acceso a los modelos Seedance — con eso ya
+# resuelto, se actualizó daily-media.js con el modelo correspondiente
+# (ver el comentario largo ahí, incluye el caveat de que es la lectura más
+# razonable de la documentación pública, no algo ya probado contra la cuenta
+# real). El cron sigue apagado a propósito por un paso más: hay que
+# confirmar con un "Run workflow" manual acá abajo que ya no da 404 antes de
+# prender el cron diario de nuevo — así, si el modelo elegido no es el
+# correcto, es un solo intento fallido y no toda una semana de runs rojos.
+# Una vez confirmado un run exitoso, descomentar la línea de "schedule" de
+# abajo. Ver daily-media.md.
 on:
-  schedule:
-    - cron: '45 10 * * *'
+  # - cron: '45 10 * * *'
   workflow_dispatch: {}
 
 jobs:

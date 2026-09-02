@@ -32,11 +32,13 @@ jobs:
       - name: Armar guías nuevas
         run: |
           # --max-time generoso: hasta 4 guías por corrida (2 gratis + 2
-          # premium por default), cada una puede tardar hasta 2 minutos —
-          # 10 minutos alcanza de sobra y evita quedarse esperando en
-          # silencio si el servidor se cuelga (ver la auditoría de
-          # confiabilidad del 2/9/2026 en los otros workflows).
-          response=$(curl -s -w "\n%{http_code}" --max-time 600 -X POST "${{ secrets.MENTIS_GUIDES_URL }}" \
+          # premium por default), y las premium ahora pueden tardar hasta 3
+          # minutos cada una (se subió el límite de tokens de Claude para
+          # que dejen de cortarse a mitad de camino, 2/9/2026) — 15 minutos
+          # da margen real para las 4 sin quedarse esperando en silencio si
+          # el servidor se cuelga (ver la auditoría de confiabilidad del
+          # 2/9/2026 en los otros workflows).
+          response=$(curl -s -w "\n%{http_code}" --max-time 900 -X POST "${{ secrets.MENTIS_GUIDES_URL }}" \
             -H "x-guides-secret: ${{ secrets.MENTIS_GUIDES_SECRET }}" \
             -H "content-type: application/json")
           curl_exit=$?
