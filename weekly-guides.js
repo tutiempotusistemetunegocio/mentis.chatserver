@@ -81,7 +81,12 @@ const HISTORY_LOOKBACK = 12; // cuántas combinaciones recientes del mismo tipo 
 // 2/9/2026): sin límite propio, una llamada colgada dejaba la corrida
 // esperando sin límite en vez de fallar limpio.
 const FETCH_TIMEOUT_MS = 20000;
-const GENERATE_TIMEOUT_MS = 180000; // una guía completa es más larga que un guion de reel — subido de 120s a 180s junto con el aumento de max_tokens de premium (2/9/2026), para que el límite de tiempo no corte una respuesta larga antes de que termine
+// 240s (4 min): en la primera corrida real (2/9/2026) una de las dos guías
+// premium se abortó justo por este límite ("The operation was aborted due
+// to timeout") — 180s no le alcanzó siempre con 8.000 tokens de margen. La
+// otra premium sí generó bien en ese mismo run, así que es un tema de
+// margen, no un error sistemático — se sube a 240s para darle aire real.
+const GENERATE_TIMEOUT_MS = 240000;
 
 async function dropboxListFolder(token, folderPath) {
   const res = await fetch('https://api.dropboxapi.com/2/files/list_folder', {

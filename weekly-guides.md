@@ -25,6 +25,14 @@ Rodrigo reportó (2/9/2026) que el catálogo solo estaba cargando guías gratis,
 
 Corrección: las guías premium ahora piden hasta 8.000 tokens de respuesta (las gratis, 4.500), y se agregó una verificación explícita que detecta este corte a tiempo y explica la causa real en el mensaje de error, en vez de un "JSON inválido" genérico que no decía por qué. También se subió el tiempo máximo de esta llamada (de 2 a 3 minutos) y el `--max-time` del workflow de GitHub Actions (de 10 a 15 minutos), para que una guía premium más larga tenga tiempo real de terminar.
 
+## Bug real encontrado en la primera corrida en vivo (2/9/2026): el PDF fallaba siempre
+
+Confirmó exactamente el caveat que se le avisó a Rodrigo cuando se entregó `guide-pdf.js`: no se había podido ejecutar en el entorno de trabajo donde se escribió (el registro de npm estaba bloqueado ahí), solo se revisó la sintaxis. En la primera corrida real, las 3 guías se generaron bien (el `.md` de cada una se guardó sin problema — el aislamiento entre guía y PDF funcionó como estaba pensado), pero el PDF de las 3 falló con "Maximum call stack size exceeded".
+
+Causa real: dentro del evento `pageAdded` de pdfkit se dibujaba el pie de página con texto (`doc.text()`) mientras pdfkit todavía estaba paginando automáticamente por desborde de texto — eso lo hace reentrar en su propia lógica de layout, un problema conocido de esa librería. Corregido: ese evento ahora solo pinta el fondo de color (un rectángulo relleno, nunca texto), y el pie de página se agrega en un paso aparte, después, sobre las páginas ya generadas — cuando ya no hay ninguna paginación automática en curso. Las 3 guías de esa primera corrida se quedaron sin PDF (quedan así, no se regeneran solas); las que se generen de acá en adelante sí deberían salir bien.
+
+También en esa misma corrida, una de las dos guías premium se abortó por el límite de tiempo (180s no le alcanzó siempre con el nuevo margen de tokens) — se subió a 240s.
+
 ## Cada guía sale también en PDF con diseño
 
 Pedido explícito de Rodrigo (2/9/2026): "¿tienes una estructura hecha? ¿versión PDF? ¿los colores?". Cada guía ahora se arma en dos formatos que dicen exactamente lo mismo: el `.md` de siempre (para leerla en el panel) y un PDF (`guide-pdf.js`) con la misma identidad visual que la página personal y el chat premium — fondo azul marino oscuro, acentos en teal y ámbar, portada con título/subtítulo/categorías. Para lograr que ambos coincidan siempre, Mentis ya no devuelve un bloque de texto libre: devuelve la guía dividida en "bloques" (títulos de sección, párrafos, listas, citas), y de ahí se arman tanto el `.md` como el PDF.

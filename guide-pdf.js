@@ -117,6 +117,20 @@ function renderBloque(doc, bloque) {
   doc.moveDown(0.5);
 }
 
+// BUG REAL encontrado en la primera corrida en vivo (2/9/2026) — el caveat
+// que se le avisó a Rodrigo se cumplió, esto no se había podido ejecutar en
+// el entorno de trabajo donde se escribió, solo revisar sintaxis. Las 3
+// guías generadas ese día fallaron TODAS al armar el PDF con "Maximum call
+// stack size exceeded". Causa: dibujar texto (`doc.text()`, en drawFooter)
+// dentro del evento `pageAdded` mientras pdfkit todavía está paginando
+// automáticamente por desborde de texto (dentro del forEach de bloques) lo
+// hace reentrar en su propia lógica de layout — es un problema conocido de
+// pdfkit, no un detalle menor. La corrección: el evento `pageAdded` ahora
+// SOLO pinta el fondo (un rectángulo relleno, `doc.rect().fill()` — nunca
+// texto, eso no dispara paginación). El pie de página con texto se agrega
+// después, en un segundo paso sobre las páginas ya generadas
+// (`bufferPages` + `switchToPage`), cuando ya no hay ninguna paginación
+// automática en curso.
 async function renderGuidePDF(guide) {
   return new Promise((resolve, reject) => {
     try {
@@ -130,21 +144,24 @@ async function renderGuidePDF(guide) {
       doc.addPage({ size: 'A4', margins: { top: 0, bottom: 0, left: 0, right: 0 } });
       drawCover(doc, guide);
 
-      // Páginas de contenido — acá sí con los márgenes normales, y el fondo
-      // + pie de página se redibujan solos en cada página nueva que agregue
-      // el flujo automático de texto de pdfkit.
-      let pageNum = 1;
-      doc.on('pageAdded', () => {
-        pageNum++;
-        drawPageBackground(doc);
-        drawFooter(doc, String(pageNum - 1));
-      });
+      // A partir de acá, cada página nueva (esta primera manual, y las que
+      // vengan solas por desborde de texto) pinta su propio fondo — nunca
+      // texto en este evento, ver el comentario de arriba.
+      doc.on('pageAdded', () => drawPageBackground(doc));
 
       doc.addPage({ size: 'A4', margins: MARGIN });
       drawPageBackground(doc);
-      drawFooter(doc, '1');
 
       (guide.bloques || []).forEach((bloque) => renderBloque(doc, bloque));
+
+      // Pie de página — recién ahora, en un paso aparte sobre las páginas de
+      // contenido ya generadas (todas menos la portada, índice 0), con todo
+      // el texto de la guía ya escrito y sin ninguna paginación en curso.
+      const range = doc.bufferedPageRange();
+      for (let i = range.start + 1; i < range.start + range.count; i++) {
+        doc.switchToPage(i);
+        drawFooter(doc, String(i));
+      }
 
       doc.end();
     } catch (err) {
