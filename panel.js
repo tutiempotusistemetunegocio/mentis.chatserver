@@ -20,11 +20,15 @@
 // configuración está puesta, no que la API en sí esté respondiendo bien hoy
 // (para eso, la fuente real sigue siendo GitHub Actions).
 //
-// Dos rutas:
-//  - GET /panel/<secreto>            → la página completa.
-//  - GET /panel/<secreto>/guia/<id>  → el texto de una guía puntual (para
+// Tres rutas:
+//  - GET /panel/<secreto>                → la página completa.
+//  - GET /panel/<secreto>/guia/<id>      → el texto de una guía puntual (para
 //    no tener que bajar el contenido de todas las guías en cada visita a
 //    medida que el catálogo crezca semana a semana).
+//  - GET /panel/<secreto>/guia/<id>/pdf  → el PDF con diseño de esa guía
+//    (guide-pdf.js), si esta guía en particular llegó a tener uno — las
+//    generadas antes de que existiera ese módulo, o cuya subida falló, no lo
+//    tienen, y el link no aparece en la tabla para esas.
 
 const { getDropboxAccessToken } = require('./dropbox-auth');
 
@@ -57,6 +61,16 @@ async function dropboxDownloadText(token, dropboxPath) {
   return res.text();
 }
 
+async function dropboxDownloadBinary(token, dropboxPath) {
+  const res = await fetch('https://content.dropboxapi.com/2/files/download', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath }) },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} descargando ${dropboxPath}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -84,8 +98,11 @@ async function loadPanelData() {
 function guideRow(g, secret) {
   const cats = (g.categorias || []).join(' + ');
   const fecha = (g.creadaEn || '').slice(0, 10);
+  const pdfLink = g.archivoPdf
+    ? ` · <a href="/panel/${secret}/guia/${encodeURIComponent(g.id)}/pdf" target="_blank">PDF</a>`
+    : ' · <span class="dim">sin PDF</span>';
   return `<tr>
-    <td><a href="/panel/${secret}/guia/${encodeURIComponent(g.id)}" target="_blank">${esc(g.titulo)}</a></td>
+    <td><a href="/panel/${secret}/guia/${encodeURIComponent(g.id)}" target="_blank">${esc(g.titulo)}</a>${pdfLink}</td>
     <td class="dim">${esc(cats)}</td>
     <td class="dim">${esc(fecha)}</td>
     <td class="dim">${g.citas ? `${g.citas} cita(s)` : '—'}</td>
@@ -160,6 +177,18 @@ async function renderGuideContent(secret, id) {
   return text;
 }
 
+// Guías generadas antes de que existiera guide-pdf.js (o cuya subida de PDF
+// falló en su momento) no tienen `archivoPdf` en el catálogo — acá se
+// devuelve null en vez de tirar error, para que la ruta responda 404 en vez
+// de un 500 confuso.
+async function renderGuidePdf(secret, id) {
+  const token = await getDropboxAccessToken();
+  const catalog = await dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] });
+  const entry = catalog.entries.find((e) => e.id === id);
+  if (!entry || !entry.archivoPdf) return null;
+  return dropboxDownloadBinary(token, `${GUIDES_FOLDER}/${entry.tipo}/${entry.archivoPdf}`);
+}
+
 function page(title, body) {
   return `<!doctype html>
 <html lang="es"><head>
@@ -198,4 +227,4 @@ function page(title, body) {
 </div></body></html>`;
 }
 
-module.exports = { renderPanel, renderGuideContent };
+module.exports = { renderPanel, renderGuideContent, renderGuidePdf };

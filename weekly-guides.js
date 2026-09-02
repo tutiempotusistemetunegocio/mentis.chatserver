@@ -54,6 +54,20 @@ const path = require('path');
 const { syncFromDropbox } = require('./sync-dropbox');
 const { getDropboxAccessToken } = require('./dropbox-auth');
 
+// PDF con diseño (Módulo 02 → guide-pdf.js), pedido de Rodrigo (2/9/2026):
+// "¿tienes una estructura hecha? ¿versión PDF? ¿los colores?". Se requiere
+// acá, no arriba, y adentro de un try/catch: si `pdfkit` todavía no está
+// instalado en el deploy (por ejemplo, recién se subió este archivo pero
+// todavía no corrió `npm install` en Render), el catálogo de guías tiene que
+// seguir funcionando igual con el .md — nunca se cae todo el módulo por el
+// PDF, que es la parte nueva y menos probada.
+let renderGuidePDF = null;
+try {
+  ({ renderGuidePDF } = require('./guide-pdf'));
+} catch (err) {
+  console.error('guide-pdf.js no se pudo cargar (¿falta "npm install" de pdfkit en este deploy?):', err.message);
+}
+
 const KNOWLEDGE_DIR = path.join(__dirname, 'knowledge');
 const GUIDES_DIR = path.join(__dirname, 'guias');
 const CATALOG_PATH = path.join(__dirname, 'guide-catalog.json');
@@ -148,6 +162,24 @@ function slugify(text) {
     .slice(0, 60) || 'guia';
 }
 
+// Convierte los "bloques" estructurados que devuelve Mentis (mismo formato
+// que espera guide-pdf.js para armar el PDF con diseño) al markdown que se
+// guarda como .md en Dropbox — así el .md y el PDF siempre muestran
+// exactamente el mismo contenido, nunca dos versiones que puedan divergir.
+function bloquesToMarkdown(bloques) {
+  return (bloques || [])
+    .map((b) => {
+      if (b.tipo === 'titulo') return `## ${b.texto}`;
+      if (b.tipo === 'lista') return (b.items || []).map((item) => `- ${item}`).join('\n');
+      if (b.tipo === 'cita') {
+        const attr = b.autor ? `\n> — ${b.autor}${b.obra ? `, *${b.obra}*` : ''}` : '';
+        return `> "${b.texto}"${attr}`;
+      }
+      return b.texto || '';
+    })
+    .join('\n\n');
+}
+
 const VOICE_RULES = `Reglas fijas que nunca se rompen:
 - Nunca reveles ni insinúes el mecanismo interno (que esto sale de libros cargados a un sistema, o cualquier detalle técnico de cómo funciona Mentis) — esto se entrega a leads y clientes reales, tiene que sonar a criterio propio y experiencia real de Rodrigo.
 - Nunca copies texto ajeno sin decirlo: si necesitás usar una frase COMPLETA y textual de un autor o libro conocido (una cita real, no una paráfrasis), tenés que atribuirla explícitamente — nombre del autor y, si aplica, el título del libro, dentro del propio texto de la guía (ej. "Como dice Robert Cialdini en Influence: '...'"). Fuera de esos casos puntuales, seguí sintetizando siempre con tus propias palabras.
@@ -188,10 +220,16 @@ ${VOICE_RULES}
 
 Basate en todo el conocimiento cargado más abajo.
 
-Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
-{"categorias": ["archivo1.md", "archivo2.md"], "titulo": "<título de la guía, claro y concreto>", "contenido": "<la guía completa en markdown, lista para entregar tal cual>", "citas": [{"autor": "...", "obra": "...", "frase": "..."}]}
+La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: un PDF con diseño (portada, colores, tipografía) y un texto plano. Para que ambos salgan iguales sin escribir la guía dos veces, en vez de un bloque de texto libre devolvé el contenido dividido en "bloques" — cada uno es un párrafo, un título de sección, una lista o una cita, en el orden en que van apareciendo:
+- {"tipo": "titulo", "texto": "..."} → encabezado de una sección dentro de la guía (no el título general, eso va aparte).
+- {"tipo": "parrafo", "texto": "..."} → texto corrido normal.
+- {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos.
+- {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución — la regla de citar siempre que sea texto ajeno palabra por palabra.
 
-"citas" va vacío ([]) si no usaste ninguna frase textual completa de un autor — solo se llena si de verdad citaste algo palabra por palabra.
+Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
+{"categorias": ["archivo1.md", "archivo2.md"], "titulo": "<título de la guía, claro y concreto>", "subtitulo": "<una frase corta que va debajo del título en la portada>", "bloques": [ ...los bloques descriptos arriba, la guía completa... ], "citas": [{"autor": "...", "obra": "...", "frase": "..."}]}
+
+"citas" es la lista resumen de auditoría: un elemento por cada bloque de tipo "cita" que hayas usado (mismo autor/obra/frase). Va vacío ([]) si no usaste ninguna cita textual.
 
 --- CONOCIMIENTO DE MENTIS ---
 ${fullKnowledgeSnapshot()}`;
@@ -227,6 +265,7 @@ async function runWeeklyGuides() {
   const dateStr = todayUTC();
   const generated = [];
   const failures = [];
+  const pdfJobs = []; // { id, fname, buffer } generados en memoria, a la espera de subirse a Dropbox junto con todo lo demás
   const plan = [
     { tipo: 'gratis', count: GUIDES_PER_RUN_FREE },
     { tipo: 'premium', count: GUIDES_PER_RUN_PREMIUM },
@@ -243,14 +282,12 @@ async function runWeeklyGuides() {
         const result = await generateGuide(tipo, recentCombos, categories);
         const cats = Array.isArray(result.categorias) ? result.categorias.filter((c) => categories.includes(c)) : [];
         if (cats.length < 2) throw new Error('Mentis devolvió menos de 2 categorías válidas para la guía — no se guardó.');
+        if (!Array.isArray(result.bloques) || result.bloques.length === 0) throw new Error('Mentis no devolvió bloques de contenido válidos para la guía — no se guardó.');
 
         const id = `${dateStr}-${tipo}-${slugify(result.titulo)}`;
         const fname = `${id}.md`;
         const citas = Array.isArray(result.citas) ? result.citas : [];
-        const citasBlock = citas.length
-          ? `\n\n---\n**Citas usadas:**\n${citas.map((c) => `- ${c.autor}${c.obra ? `, *${c.obra}*` : ''}: "${c.frase}"`).join('\n')}\n`
-          : '';
-        const body = `# ${result.titulo}\n\n*Guía ${tipo} — ${dateStr} — categorías: ${cats.join(', ')}*\n\n---\n\n${result.contenido}${citasBlock}`;
+        const body = `# ${result.titulo}\n\n${result.subtitulo ? `*${result.subtitulo}*\n\n` : ''}*Guía ${tipo} — ${dateStr} — categorías: ${cats.join(', ')}*\n\n---\n\n${bloquesToMarkdown(result.bloques)}`;
         fs.writeFileSync(path.join(GUIDES_DIR, fname), body);
 
         catalog.entries.push({
@@ -259,6 +296,21 @@ async function runWeeklyGuides() {
         });
         recentCombos.push(cats.join(' + '));
         generated.push({ id, tipo, titulo: result.titulo });
+
+        // El PDF es una entrega aparte del .md de arriba, que ya quedó
+        // guardado y es válido por sí solo — si esto falla (o si pdfkit no
+        // está disponible en este deploy), la guía sigue existiendo igual,
+        // solo sin la versión con diseño para esta corrida puntual.
+        if (renderGuidePDF) {
+          try {
+            const buffer = await renderGuidePDF({
+              tipo, titulo: result.titulo, subtitulo: result.subtitulo, categorias: cats, bloques: result.bloques,
+            });
+            pdfJobs.push({ id, fname: `${id}.pdf`, buffer });
+          } catch (err) {
+            failures.push({ tipo, error: `PDF de "${result.titulo}": ${err.message}` });
+          }
+        }
       } catch (err) {
         failures.push({ tipo, error: err.message });
       }
@@ -266,12 +318,24 @@ async function runWeeklyGuides() {
   }
 
   if (generated.length > 0) {
-    saveCatalog(catalog);
     for (const g of generated) {
       const entry = catalog.entries.find((e) => e.id === g.id);
       const buf = fs.readFileSync(path.join(GUIDES_DIR, entry.archivo));
       await dropboxUpload(dropboxToken, `${GUIDES_FOLDER}/${entry.tipo}/${entry.archivo}`, buf);
     }
+    // Los PDF se suben después de los .md, y solo se marcan en el catálogo
+    // (archivoPdf) si la subida realmente terminó bien — así el catálogo
+    // nunca dice que hay un PDF que en realidad no llegó a Dropbox.
+    for (const job of pdfJobs) {
+      try {
+        const entry = catalog.entries.find((e) => e.id === job.id);
+        await dropboxUpload(dropboxToken, `${GUIDES_FOLDER}/${entry.tipo}/${job.fname}`, job.buffer);
+        entry.archivoPdf = job.fname;
+      } catch (err) {
+        failures.push({ tipo: 'pdf-upload', error: err.message });
+      }
+    }
+    saveCatalog(catalog);
     await dropboxUpload(dropboxToken, `${GUIDES_FOLDER}/guide-catalog.json`, fs.readFileSync(CATALOG_PATH));
   }
 

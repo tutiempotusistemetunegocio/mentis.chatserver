@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "pdf-parse": "^1.1.1",
-    "mammoth": "^1.8.0"
+    "mammoth": "^1.8.0",
+    "pdfkit": "^0.15.0"
   }
 }

@@ -566,7 +566,20 @@ const server = http.createServer((req, res) => {
     const urlSecret = parts[1] || null;
     if (!expected || !urlSecret || urlSecret !== expected) { res.writeHead(404); return res.end('No encontrado'); }
     // eslint-disable-next-line global-require
-    const { renderPanel, renderGuideContent } = require('./panel');
+    const { renderPanel, renderGuideContent, renderGuidePdf } = require('./panel');
+    if (parts[2] === 'guia' && parts[3] && parts[4] === 'pdf') {
+      renderGuidePdf(urlSecret, decodeURIComponent(parts[3]))
+        .then((buffer) => {
+          if (buffer === null) { res.writeHead(404); return res.end('Esta guía todavía no tiene PDF.'); }
+          res.writeHead(200, { 'content-type': 'application/pdf' });
+          res.end(buffer);
+        })
+        .catch((err) => {
+          console.error('Error descargando el PDF de una guía:', err.message);
+          res.writeHead(500); res.end('No se pudo descargar el PDF: ' + err.message);
+        });
+      return;
+    }
     if (parts[2] === 'guia' && parts[3]) {
       renderGuideContent(urlSecret, decodeURIComponent(parts[3]))
         .then((text) => {
