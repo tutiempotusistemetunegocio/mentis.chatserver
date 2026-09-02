@@ -1,0 +1,56 @@
+name: Guías semanales de Mentis
+
+# Dispara el armado de guías (Módulo 02 → weekly-guides.js) — arma hasta
+# GUIDES_PER_RUN_FREE gratis + GUIDES_PER_RUN_PREMIUM premium (2 y 2 por
+# default) cada vez que corre. Mismo patrón que los otros workflows: no hace
+# nada acá adentro, solo llama al servidor ya desplegado en Render con un
+# secreto propio.
+#
+# Para juntar rápido las primeras 10 gratis + 10 premium antes de vender:
+# disparar este workflow a mano varias veces seguidas desde la pestaña
+# "Actions" de GitHub (botón "Run workflow") — el mismo truco que ya se usó
+# para ponerse al día con el backlog de libros de la lectura diaria. Después
+# de eso, el cron semanal solo hace la reposición de 2+2.
+#
+# Configuración necesaria, una sola vez, en GitHub:
+#  Settings → Secrets and variables → Actions → New repository secret
+#   - MENTIS_GUIDES_URL: la URL completa, por ejemplo
+#     https://mentis-chatserver.onrender.com/internal/weekly-guides
+#   - MENTIS_GUIDES_SECRET: el mismo valor que GUIDES_SECRET en Render
+
+on:
+  schedule:
+    # Lunes 11:00 UTC — después de que ya corrió la lectura diaria de esa
+    # mañana, así las guías usan conocimiento fresco. Ajustable.
+    - cron: '0 11 * * 1'
+  workflow_dispatch: {} # permite dispararlo a mano, cuantas veces haga falta, para probar o ponerse al día
+
+jobs:
+  guias:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Armar guías nuevas
+        run: |
+          # --max-time generoso: hasta 4 guías por corrida (2 gratis + 2
+          # premium por default), y las premium ahora pueden tardar hasta 3
+          # minutos cada una (se subió el límite de tokens de Claude para
+          # que dejen de cortarse a mitad de camino, 2/9/2026) — 15 minutos
+          # da margen real para las 4 sin quedarse esperando en silencio si
+          # el servidor se cuelga (ver la auditoría de confiabilidad del
+          # 2/9/2026 en los otros workflows).
+          response=$(curl -s -w "\n%{http_code}" --max-time 900 -X POST "${{ secrets.MENTIS_GUIDES_URL }}" \
+            -H "x-guides-secret: ${{ secrets.MENTIS_GUIDES_SECRET }}" \
+            -H "content-type: application/json")
+          curl_exit=$?
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "El armado de guías falló — no hubo respuesta del servidor a tiempo (curl exit $curl_exit, probablemente un timeout)."
+            exit 1
+          fi
+          body=$(echo "$response" | head -n -1)
+          code=$(echo "$response" | tail -n 1)
+          echo "HTTP $code"
+          echo "$body"
+          if [ "$code" -ge 400 ]; then
+            echo "El armado de guías falló — revisá el mensaje de arriba."
+            exit 1
+          fi
