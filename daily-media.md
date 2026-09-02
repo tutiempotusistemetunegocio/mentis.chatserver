@@ -1,5 +1,13 @@
 # Video diario — Módulo 03 → clip generado con Higgsfield
 
+## Historial del 404 persistente — resuelto, falta la última confirmación
+
+Después de ida y vuelta con soporte de Higgsfield sobre un 404 que no se iba, se confirmó la causa real mirando directamente el dashboard de la cuenta (`cloud.higgsfield.ai`): la API de Higgsfield es una plataforma separada del plan de la web, y la cuenta de Rodrigo nunca había activado esa parte — 0 créditos, y los únicos dos modelos habilitados eran Soul 2 y Soul Cinema, los dos de generación de imagen, ninguno de video. Por eso todo pedido fallaba, sin importar qué modelo de video se pidiera.
+
+**Actualización (2/9/2026): Rodrigo pasó a Higgsfield Plus** (1.200 créditos/mes, acceso completo a los modelos Seedance) — eso resuelve la falta de plan. Se actualizó `HIGGSFIELD_MODEL_PATH` en `daily-media.js` a la ruta "pro/fast" en vez de "lite" (con el caveat completo, escrito en el propio código: es la lectura más razonable de la documentación pública de la API, ya que ahí no aparece ninguna ruta separada para los nombres de marketing "Seedance 2.5"/"Seedance 2.0" que muestra el panel de precios — no es algo ya confirmado contra la cuenta real).
+
+Por eso el cron diario sigue apagado un paso más, a propósito: hace falta un "Run workflow" manual desde GitHub Actions que confirme que ya no da 404 antes de prender el cron de nuevo — así, si el modelo elegido no fuera el correcto, es un solo intento fallido en vez de toda una semana de runs rojos. Una vez confirmado, se descomenta la línea de `schedule` en `daily-media.yml` y queda corriendo solo como el resto de las tareas diarias.
+
 Sigue al guion diario (`daily-script.js`): una vez que el guion del día está escrito y guardado, `daily-media.js` le pide a Higgsfield un clip de video corto basado en el ángulo de ese guion. Corre dentro del mismo servidor (`mentis-chat-server`, Módulo 08), expuesto como dos rutas protegidas: `POST /internal/daily-media` (dispara el pedido) y `POST /webhook/higgsfield-listo/<secreto>/<fecha>` (recibe el aviso cuando el clip está listo).
 
 ## Una salvedad honesta: esto genera un clip corto, no el reel completo

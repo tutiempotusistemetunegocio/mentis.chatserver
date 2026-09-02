@@ -77,7 +77,7 @@ function esc(s) {
 
 function connectionStatus() {
   const rows = [
-    { name: 'Higgsfield (video diario)', on: !!(process.env.HIGGSFIELD_KEY_ID && process.env.HIGGSFIELD_KEY_SECRET), note: 'claves cargadas, pero la API sigue devolviendo 404 de cuenta/plan — a la espera de soporte' },
+    { name: 'Higgsfield (video diario)', on: !!(process.env.HIGGSFIELD_KEY_ID && process.env.HIGGSFIELD_KEY_SECRET), note: 'plan Plus activado y modelo actualizado a Seedance Pro Fast — falta la primera corrida manual que confirme que ya no da 404 antes de prender el cron diario de nuevo' },
     { name: 'Metricool (publicar + métricas)', on: false, note: 'cuenta creada (plan free), a propósito sin conectar hasta que Higgsfield funcione' },
     { name: 'ManyChat (comentario → guía gratis)', on: false, note: 'cuenta creada, todavía sin construir' },
     { name: 'Systeme.io + Stripe (cobro)', on: !!(process.env.SYSTEME_PREMIUM_WEBHOOK_SECRET || process.env.SYSTEME_PANEL_WEBHOOK_SECRET), note: 'en pausa — el plan gratis no alcanza para las reglas que hacen falta' },

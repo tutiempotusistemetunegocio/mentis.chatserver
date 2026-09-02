@@ -57,15 +57,26 @@ const CONTENT_DIR = path.join(__dirname, 'contenido');
 const HISTORY_PATH = path.join(__dirname, 'content-history.json');
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 const HIGGSFIELD_API_BASE = 'https://api.higgsfield.ai';
-// Seedance Lite: el modelo más básico de Higgsfield — se usa acá porque la
-// prueba real (31/8/2026) mostró que "Pro Fast" devuelve 404 ("modelo no
-// disponible para esta cuenta", según docs.higgsfield.ai/docs/concepts/errors
-// — un tema de plan, no de código) en la cuenta gratis/de entrada de
-// Rodrigo. Si más adelante paga un plan que incluya modelos superiores,
-// cambiar de modelo es solo cambiar este valor (ver
-// higgsfield-metricool-preparacion.md para el resto de los modelos
-// disponibles).
-const HIGGSFIELD_MODEL_PATH = '/bytedance/seedance/v1/lite/text-to-video';
+// REACTIVADO (2/9/2026): Rodrigo pasó su cuenta de Higgsfield al plan Plus
+// (1.200 créditos/mes, "acceso completo a todos los modelos Seedance"), que
+// es justo lo que faltaba — la cuenta anterior tenía 0 créditos y solo dos
+// modelos de imagen habilitados (Soul 2, Soul Cinema), por eso todo pedido
+// de video daba 404 sin importar qué modelo se pidiera.
+//
+// Caveat honesto sobre el valor elegido acá: el panel de precios de
+// higgsfield.ai muestra los modelos como "Seedance 2.5" (1080p) y "Seedance
+// 2.0" (4K) — nombres de marketing. La especificación pública de la API
+// (docs.higgsfield.ai/docs/openapi.json), revisada de nuevo hoy, todavía
+// solo expone cuatro rutas de Seedance, todas bajo "v1": lite y pro/fast,
+// cada una en texto→video e imagen→video — no hay ninguna ruta "v2" ni
+// "2.5" documentada públicamente. La lectura más razonable es que "Pro
+// Fast" (antes bloqueada por el plan viejo, de ahí el 404 original) es la
+// que corresponde al acceso Seedance que da el plan Plus, así que se volvió
+// a esa ruta en vez de la "lite". Esto es una inferencia de la documentación
+// pública, no algo confirmado contra la cuenta real de Rodrigo — conviene
+// disparar /internal/daily-media a mano una vez (o esperar al próximo 10:45
+// UTC) y confirmar que ya no da 404 antes de darlo por resuelto del todo.
+const HIGGSFIELD_MODEL_PATH = '/bytedance/seedance/v1/pro/fast/text-to-video';
 const CLIP_DURATION_SECONDS = 10;
 
 // Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
