@@ -81,7 +81,7 @@ const HISTORY_LOOKBACK = 12; // cuántas combinaciones recientes del mismo tipo 
 // 2/9/2026): sin límite propio, una llamada colgada dejaba la corrida
 // esperando sin límite en vez de fallar limpio.
 const FETCH_TIMEOUT_MS = 20000;
-const GENERATE_TIMEOUT_MS = 120000; // una guía completa es más larga que un guion de reel
+const GENERATE_TIMEOUT_MS = 180000; // una guía completa es más larga que un guion de reel — subido de 120s a 180s junto con el aumento de max_tokens de premium (2/9/2026), para que el límite de tiempo no corte una respuesta larga antes de que termine
 
 async function dropboxListFolder(token, folderPath) {
   const res = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
@@ -196,6 +196,15 @@ async function callMentis(prompt, maxTokens) {
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status} generando la guía`);
+  // Si Claude se quedó sin espacio (max_tokens) a mitad de la guía, el JSON
+  // queda cortado a la mitad — JSON.parse tira un error genérico ("Unexpected
+  // end of JSON input") que no dice por qué. Se detecta acá antes de intentar
+  // parsear, con un mensaje que sí explica la causa real (esto fue justamente
+  // lo que estaba pasando con las guías premium — más profundidad = más
+  // texto = más fácil llegar al techo de tokens que las gratis).
+  if (data.stop_reason === 'max_tokens') {
+    throw new Error(`La guía se cortó a mitad de camino por quedarse sin espacio de respuesta (max_tokens=${maxTokens}) — no se guardó. Hace falta más margen para este tipo de guía.`);
+  }
   const raw = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('Mentis no devolvió JSON válido generando la guía.');
@@ -203,6 +212,17 @@ async function callMentis(prompt, maxTokens) {
 }
 
 async function generateGuide(tipo, recentCombos, categories) {
+  // Las guías premium piden explícitamente más profundidad (varios
+  // frameworks, ejemplos paso a paso) que las gratis — con el formato viejo
+  // (un bloque de texto) 4000 tokens alcanzaba casi siempre, pero el nuevo
+  // formato de "bloques" en JSON pesa más por la misma guía (comillas,
+  // llaves, claves repetidas), y sumado a que premium ya de por sí pide más
+  // contenido, 4000 se quedaba corto justo para premium — por eso las
+  // gratis se estaban generando bien y las premium no, siempre fallando
+  // silenciosamente con el mismo techo. Ver el chequeo de stop_reason arriba,
+  // que ahora deja esto explícito en vez de un error genérico de JSON.
+  const maxTokens = tipo === 'premium' ? 8000 : 4500;
+
   const depthNote = tipo === 'premium'
     ? 'Es una guía PREMIUM (paga): profundidad real, varios frameworks combinados, ejemplos aplicados paso a paso — tiene que sentirse claramente más valiosa que una guía gratis, no solo más larga.'
     : 'Es una guía GRATIS (lead magnet): un framework claro y accionable, valor real y completo en sí mismo, pero sin agotar todo lo que Mentis sabe del tema — deja con ganas de más, nunca se siente incompleta a propósito.';
@@ -234,7 +254,7 @@ Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de c
 --- CONOCIMIENTO DE MENTIS ---
 ${fullKnowledgeSnapshot()}`;
 
-  return callMentis(prompt, 4000);
+  return callMentis(prompt, maxTokens);
 }
 
 async function runWeeklyGuides() {

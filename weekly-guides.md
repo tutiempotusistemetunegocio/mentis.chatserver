@@ -19,6 +19,12 @@ Cada corrida genera hasta `GUIDES_PER_RUN_FREE` gratis + `GUIDES_PER_RUN_PREMIUM
 
 Es una decisión mía, no viene del plano — se la marco a Rodrigo por las dudas: la guía gratis entrega un framework claro y completo en sí mismo, pero sin agotar todo lo que Mentis sabe del tema (deja con ganas de más, a propósito). La premium busca sentirse claramente más valiosa: varios frameworks combinados, más profundidad y ejemplos aplicados paso a paso — no solo "más larga". Si Rodrigo quiere otro criterio de diferenciación, es un cambio de prompt, no de arquitectura.
 
+## Bug encontrado y corregido: las premium se cortaban a mitad de camino
+
+Rodrigo reportó (2/9/2026) que el catálogo solo estaba cargando guías gratis, ninguna premium. La causa: al pedirle a Claude una guía completa, se le pedía un límite fijo de 4.000 tokens de respuesta para los dos tipos por igual. Las guías premium piden explícitamente más profundidad (varios frameworks, ejemplos paso a paso), y con el formato nuevo de "bloques" en JSON (que pesa más que texto plano por las comillas y llaves) la respuesta se quedaba sin espacio a mitad de la guía — el JSON quedaba cortado, no se podía leer, y esa guía se perdía en silencio (quedaba solo en el registro de fallas de la corrida, no visible en el panel). Las gratis, al pedir menos profundidad, entraban casi siempre dentro del mismo límite y por eso sí se estaban generando.
+
+Corrección: las guías premium ahora piden hasta 8.000 tokens de respuesta (las gratis, 4.500), y se agregó una verificación explícita que detecta este corte a tiempo y explica la causa real en el mensaje de error, en vez de un "JSON inválido" genérico que no decía por qué. También se subió el tiempo máximo de esta llamada (de 2 a 3 minutos) y el `--max-time` del workflow de GitHub Actions (de 10 a 15 minutos), para que una guía premium más larga tenga tiempo real de terminar.
+
 ## Cada guía sale también en PDF con diseño
 
 Pedido explícito de Rodrigo (2/9/2026): "¿tienes una estructura hecha? ¿versión PDF? ¿los colores?". Cada guía ahora se arma en dos formatos que dicen exactamente lo mismo: el `.md` de siempre (para leerla en el panel) y un PDF (`guide-pdf.js`) con la misma identidad visual que la página personal y el chat premium — fondo azul marino oscuro, acentos en teal y ámbar, portada con título/subtítulo/categorías. Para lograr que ambos coincidan siempre, Mentis ya no devuelve un bloque de texto libre: devuelve la guía dividida en "bloques" (títulos de sección, párrafos, listas, citas), y de ahí se arman tanto el `.md` como el PDF.
