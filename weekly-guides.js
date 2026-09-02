@@ -81,12 +81,11 @@ const HISTORY_LOOKBACK = 12; // cuántas combinaciones recientes del mismo tipo 
 // 2/9/2026): sin límite propio, una llamada colgada dejaba la corrida
 // esperando sin límite en vez de fallar limpio.
 const FETCH_TIMEOUT_MS = 20000;
-// 240s (4 min): en la primera corrida real (2/9/2026) una de las dos guías
-// premium se abortó justo por este límite ("The operation was aborted due
-// to timeout") — 180s no le alcanzó siempre con 8.000 tokens de margen. La
-// otra premium sí generó bien en ese mismo run, así que es un tema de
-// margen, no un error sistemático — se sube a 240s para darle aire real.
-const GENERATE_TIMEOUT_MS = 240000;
+// 300s (5 min): en la corrida del 2/9/2026 una premium se abortó por este
+// límite con 8.000 tokens de margen — al subir el techo de tokens de la
+// premium (ver el comentario en generateGuide) hace falta más tiempo real
+// también, así que se sube de 240s a 300s en el mismo cambio.
+const GENERATE_TIMEOUT_MS = 300000;
 
 async function dropboxListFolder(token, folderPath) {
   const res = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
@@ -226,7 +225,20 @@ async function generateGuide(tipo, recentCombos, categories) {
   // gratis se estaban generando bien y las premium no, siempre fallando
   // silenciosamente con el mismo techo. Ver el chequeo de stop_reason arriba,
   // que ahora deja esto explícito en vez de un error genérico de JSON.
-  const maxTokens = tipo === 'premium' ? 8000 : 4500;
+  //
+  // Bug encontrado en la corrida real del 2/9/2026 (run #5): subir el techo
+  // premium a 8.000 no alcanzó — una de las dos premium de esa corrida
+  // volvió a cortarse justo en 8.000 tokens. La primera corrección asumía
+  // que 8.000 era "bastante margen", pero no lo era: el modelo usado acá
+  // (`claude-sonnet-4-5`, ver MODEL arriba) admite hasta 128.000 tokens de
+  // respuesta sin necesitar ningún header especial (confirmado contra la
+  // documentación pública de Anthropic el 2/9/2026, no es una suposición) —
+  // 8.000 nunca fue un límite real del modelo, era un número elegido a ojo
+  // que resultó ser insuficiente para el contenido que pide una guía
+  // premium en formato "bloques". Se sube a 20.000, con margen amplio de
+  // verdad esta vez: no cuesta más caro salvo que la guía realmente use
+  // esos tokens (se paga por lo que se genera, no por el techo puesto).
+  const maxTokens = tipo === 'premium' ? 20000 : 4500;
 
   const depthNote = tipo === 'premium'
     ? 'Es una guía PREMIUM (paga): profundidad real, varios frameworks combinados, ejemplos aplicados paso a paso — tiene que sentirse claramente más valiosa que una guía gratis, no solo más larga.'
