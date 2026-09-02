@@ -17,7 +17,7 @@ Sin `PANEL_SECRET` configurado, o con el valor equivocado en la URL, la ruta dev
 El plano describe un panel completo: stats de cada pieza, videos para descargar, historial semanal, y una sección "Estrategia" donde Mentis piensa como CEO. De todo eso, esta v1 muestra lo que hoy tiene datos reales detrás:
 
 - **Guías** (gratis y premium): el catálogo completo armado por `weekly-guides.js`, con categorías, fecha y si usó alguna cita — tocar el título abre el texto completo de la guía, y el link "PDF" al lado (cuando existe) descarga la versión con diseño. Las guías generadas antes del PDF, o cuya subida haya fallado en su momento, muestran "sin PDF" en vez del link.
-- **Contenido reciente**: los últimos guiones (reel/carrusel/podcast) y las últimas fotos elegidas.
+- **Contenido reciente**: los últimos guiones (reel/carrusel/podcast), las últimas fotos elegidas, y el prompt exacto que se le mandó a Higgsfield para cada video (pedido explícito de Rodrigo, "no veo el prompt del video" — antes se armaba y se mandaba sin dejar rastro visible en ningún lado).
 - **Estado de las conexiones**: si Higgsfield, Metricool, ManyChat y Systeme.io tienen sus variables de entorno cargadas — confirma que la configuración está puesta, **no** que la API esté respondiendo bien en este momento (para eso, la fuente real sigue siendo GitHub Actions).
 
 Lo que el plano describe y todavía no tiene datos reales detrás — Estrategia y el resumen semanal — aparece marcado como "todavía no construido" en vez de inventar números o dejar una sección vacía disfrazada de terminada. El día que se construyan esos módulos, suman su propia sección acá, sin tocar nada de lo que ya funciona.

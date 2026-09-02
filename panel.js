@@ -87,12 +87,13 @@ function connectionStatus() {
 
 async function loadPanelData() {
   const token = await getDropboxAccessToken();
-  const [catalog, contentHistory, photoHistory] = await Promise.all([
+  const [catalog, contentHistory, photoHistory, videoHistory] = await Promise.all([
     dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/content-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${MEDIA_FOLDER}/photo-history.json`, { entries: [] }),
+    dropboxDownloadJSON(token, `${CONTENT_FOLDER}/video-history.json`, { entries: [] }),
   ]);
-  return { token, catalog, contentHistory, photoHistory };
+  return { token, catalog, contentHistory, photoHistory, videoHistory };
 }
 
 function guideRow(g, secret) {
@@ -122,6 +123,7 @@ async function renderPanel(secret) {
 
   const recentContent = [...data.contentHistory.entries].slice(-12).reverse();
   const recentPhotos = [...data.photoHistory.entries].slice(-6).reverse();
+  const recentVideoPrompts = [...data.videoHistory.entries].slice(-8).reverse();
 
   const guidesSection = `
     <section>
@@ -149,6 +151,13 @@ async function renderPanel(secret) {
       <table><tbody>
         ${recentPhotos.map((e) => `<tr><td class="dim">${esc(e.date)}</td><td>${esc(e.file)}</td><td class="dim">${esc(e.angulo || '')}</td></tr>`).join('') || '<tr><td class="dim">Sin datos todavía.</td></tr>'}
       </tbody></table>
+      <h3 class="mt">Prompt de video del día <span class="count">lo que se le pide a Higgsfield, no solo el resultado</span></h3>
+      ${recentVideoPrompts.length ? recentVideoPrompts.map((e) => `
+        <div class="promptcard">
+          <div class="promptmeta"><span class="dim">${esc(e.date)}</span> · ${esc(e.duration || '')}s · <span class="dim">${esc(e.status || '')}</span></div>
+          <div class="promptangulo">${esc(e.angulo || '')}</div>
+          <pre class="promptbox">${esc(e.prompt || '')}</pre>
+        </div>`).join('') : '<p class="dim">Sin datos todavía — se guarda a partir del primer pedido de video después de este cambio.</p>'}
     </section>`;
 
   const statusSection = `
@@ -219,6 +228,10 @@ function page(title, body) {
   .pend{ color:var(--amber); font-family:ui-monospace,monospace; font-size:12px; }
   .error{ color:var(--amber); }
   pre{ white-space:pre-wrap; line-height:1.6; font-family:inherit; font-size:15px; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:24px; }
+  .promptcard{ margin-top:12px; padding:14px 16px; background:var(--card); border:1px solid var(--border); border-radius:10px; }
+  .promptmeta{ font-family:ui-monospace,monospace; font-size:11.5px; margin-bottom:4px; }
+  .promptangulo{ font-size:13.5px; margin-bottom:8px; }
+  .promptbox{ margin:0; padding:10px 12px; font-size:12.5px; background:var(--bg); border:1px solid var(--border); border-radius:6px; white-space:pre-wrap; }
 </style>
 </head><body><div class="wrap">
   <p class="kicker">MentisOS · panel personal</p>
