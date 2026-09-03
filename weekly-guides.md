@@ -37,6 +37,20 @@ Causa real: dentro del evento `pageAdded` de pdfkit se dibujaba el pie de págin
 
 También en esa misma corrida, una de las dos guías premium se abortó por el límite de tiempo (180s no le alcanzó siempre con el nuevo margen de tokens) — se subió a 240s.
 
+## Bug real encontrado con guías reales (3/9/2026): páginas en blanco de más en el PDF
+
+Rodrigo reportó que las guías premium salían con varias páginas en blanco. Causa real, en `guide-pdf.js`: el pie de página se dibuja a propósito dentro del margen inferior de la hoja (fuera del área normal de contenido) — pero pdfkit, antes de dibujar cualquier texto, chequea si entra dentro de esa misma área de contenido, y como el pie de página cae fuera a propósito, pdfkit asumía que "no entraba" y agregaba una página nueva en blanco ahí mismo antes de dibujarlo, en vez de ponerlo en la página que le estábamos pidiendo. Esto pasaba una vez por cada página de contenido — por eso se nota mucho más en las premium (con más páginas reales después de subirles el margen de tokens) que en las gratis.
+
+Corrección: justo antes de dibujar el pie de página se achica el margen inferior a 0 (así pdfkit deja de pensar que se sale de la hoja), y se restaura enseguida después de dibujarlo, sin afectar nada más del resto de la página.
+
+**Importante — esto no arregla los PDFs que ya existen**: el panel no arma el PDF al vuelo, descarga el archivo ya generado que quedó guardado en Dropbox la primera vez. Los PDFs de las guías generadas antes de este arreglo (10 gratis + 6 premium a esta fecha) van a seguir teniendo las páginas en blanco hasta que se regeneren — de acá en adelante, cada guía nueva sale limpia.
+
+## Herramienta nueva: regenerar el PDF de guías ya existentes, sin tocar el contenido
+
+Pedido de Rodrigo (3/9/2026) tras el bug de arriba: poder arreglar los PDFs viejos sin rehacer el contenido de la guía. Se agregó `regenerateGuidePdfs(onlyId)` en `weekly-guides.js`, expuesta como `POST /internal/regenerate-guide-pdfs` (mismo secreto `GUIDES_SECRET` que el resto del módulo — es la misma pieza) y un workflow nuevo de GitHub Actions, **"Regenerar PDFs de guías"** (`regenerate-guide-pdfs.yml`), sin cron — solo se dispara a mano desde la pestaña Actions, igual que el resto cuando hace falta correrlos manualmente.
+
+Cómo funciona: nunca vuelve a llamar a Mentis (no gasta nada de la API de Claude). En cambio, descarga el `.md` que ya está guardado en Dropbox para cada guía y lo reconstruye de vuelta en "bloques" (`parseGuideMarkdown`, el inverso exacto de `bloquesToMarkdown` — funciona porque ese formato es determinístico: cada bloque queda separado por una línea en blanco, y alcanza con reconocer el prefijo de cada uno — `## ` título, `- ` lista, `> "` cita, el resto párrafo — para reconstruirlo). Con eso arma el PDF de nuevo (ya con la corrección del pie de página) y lo vuelve a subir a Dropbox, actualizando `archivoPdf` en el catálogo. Sin body, regenera TODAS las guías del catálogo; con `{"id": "<id de una guía>"}` en el body, regenera solo esa. Probado el parseo inverso con casos con y sin subtítulo, título/párrafo/lista/cita (con y sin autor) — reconstruye los bloques exactamente.
+
 ## Cada guía sale también en PDF con diseño
 
 Pedido explícito de Rodrigo (2/9/2026): "¿tienes una estructura hecha? ¿versión PDF? ¿los colores?". Cada guía ahora se arma en dos formatos que dicen exactamente lo mismo: el `.md` de siempre (para leerla en el panel) y un PDF (`guide-pdf.js`) con la misma identidad visual que la página personal y el chat premium — fondo azul marino oscuro, acentos en teal y ámbar, portada con título/subtítulo/categorías. Para lograr que ambos coincidan siempre, Mentis ya no devuelve un bloque de texto libre: devuelve la guía dividida en "bloques" (títulos de sección, párrafos, listas, citas), y de ahí se arman tanto el `.md` como el PDF.

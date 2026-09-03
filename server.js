@@ -555,6 +555,39 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Regenerar el PDF de guías YA EXISTENTES (Módulo 02 → weekly-guides.js),
+  // sin pedirle contenido nuevo a Mentis — pensado para el día que se
+  // corrige un bug de armado del PDF (como el de las páginas en blanco del
+  // 3/9/2026) y los PDFs viejos, ya generados con el bug, también necesitan
+  // rehacerse. Mismo secreto que /internal/weekly-guides (es el mismo
+  // módulo). Body opcional {"id": "<id de una guía puntual>"} — sin body,
+  // regenera TODAS las guías del catálogo.
+  if (req.method === 'POST' && req.url === '/internal/regenerate-guide-pdfs') {
+    const expected = process.env.GUIDES_SECRET;
+    const got = req.headers['x-guides-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'GUIDES_SECRET no está configurado — el catálogo de guías está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      let onlyId = null;
+      try {
+        if (body) onlyId = (JSON.parse(body) || {}).id || null;
+      } catch {
+        // body vacío o no-JSON — se toma como "regenerar todas", no es un error
+      }
+      // eslint-disable-next-line global-require
+      const { regenerateGuidePdfs } = require('./weekly-guides');
+      regenerateGuidePdfs(onlyId)
+        .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+        .catch((err) => {
+          console.error('Error regenerando PDFs de guías:', err.message);
+          sendJSON(res, 500, { ok: false, error: err.message });
+        });
+    });
+    return;
+  }
+
   // Panel personal de Rodrigo (Módulo 08 → panel.js) — a diferencia de las
   // rutas /internal/*, esta la abre él mismo desde el navegador, así que el
   // secreto viaja como segmento de la URL (igual que el webhook de

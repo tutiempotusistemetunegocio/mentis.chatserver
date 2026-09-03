@@ -395,4 +395,108 @@ async function runWeeklyGuides() {
   };
 }
 
-module.exports = { runWeeklyGuides };
+// Reconstruye {titulo, subtitulo, bloques} a partir del .md ya guardado en
+// Dropbox — es el inverso exacto de bloquesToMarkdown() y del armado del
+// `body` de arriba (en runWeeklyGuides). Sirve para volver a generar el PDF
+// de una guía YA EXISTENTE sin pedirle contenido nuevo a Mentis: mismo texto
+// de siempre, solo se rearma el PDF con la versión corregida de
+// guide-pdf.js. Es un parseo heurístico (no hay ningún JSON de bloques
+// guardado aparte, solo el .md final) — funciona porque bloquesToMarkdown()
+// es determinístico y cada bloque queda separado por una línea en blanco,
+// así que alcanza con reconocer el prefijo de cada bloque para reconstruirlo.
+function parseGuideMarkdown(md) {
+  const lines = md.split('\n');
+  let titulo = '';
+  if (lines[0] && lines[0].startsWith('# ')) titulo = lines[0].slice(2).trim();
+
+  const sepIndex = lines.findIndex((l) => l.trim() === '---');
+  let subtitulo = '';
+  for (let i = 1; i < (sepIndex >= 0 ? sepIndex : lines.length); i++) {
+    const l = lines[i].trim();
+    if (!l) continue;
+    // La única línea de subtítulo posible es la primera línea no vacía
+    // después del título — si en vez de eso ya aparece la línea fija de
+    // metadata ("*Guía tipo — fecha — categorías: ...*"), es que esta guía
+    // no tenía subtítulo.
+    if (l.startsWith('*') && l.endsWith('*') && !l.startsWith('*Guía ')) subtitulo = l.slice(1, -1).trim();
+    break;
+  }
+
+  const bodyLines = sepIndex >= 0 ? lines.slice(sepIndex + 1) : [];
+  const body = bodyLines.join('\n').replace(/^\n+/, '');
+  const chunks = body.split(/\n{2,}/).map((c) => c.trim()).filter(Boolean);
+
+  const bloques = chunks.map((chunk) => {
+    if (chunk.startsWith('## ')) return { tipo: 'titulo', texto: chunk.slice(3).trim() };
+    if (chunk.startsWith('- ')) {
+      const items = chunk.split('\n').map((l) => l.replace(/^- /, '').trim()).filter(Boolean);
+      return { tipo: 'lista', items };
+    }
+    if (chunk.startsWith('> "')) {
+      const chunkLines = chunk.split('\n');
+      const texto = chunkLines[0].replace(/^> "/, '').replace(/"$/, '');
+      const attrLine = chunkLines.find((l) => l.startsWith('> — '));
+      let autor = '';
+      let obra = '';
+      if (attrLine) {
+        const attr = attrLine.replace(/^> — /, '');
+        const m = attr.match(/^(.*?)(?:, \*(.*)\*)?$/);
+        if (m) { autor = (m[1] || '').trim(); obra = (m[2] || '').trim(); }
+      }
+      return { tipo: 'cita', texto, autor, obra };
+    }
+    return { tipo: 'parrafo', texto: chunk };
+  });
+
+  return { titulo, subtitulo, bloques };
+}
+
+// Regenera el PDF de una o varias guías YA EXISTENTES a partir del .md que
+// ya está guardado en Dropbox (nunca vuelve a pedirle contenido a Mentis) —
+// pensado para el día que se corrige un bug de armado en guide-pdf.js (como
+// el de las páginas en blanco del 3/9/2026) y hace falta que los PDFs
+// viejos, ya entregados, también queden bien — no solo los nuevos de acá en
+// adelante. Sin `onlyId`, regenera TODAS las guías del catálogo que tengan
+// un .md guardado (el PDF es barato de rehacer: no gasta nada de la API de
+// Claude, solo pdfkit local + subir el archivo a Dropbox).
+async function regenerateGuidePdfs(onlyId) {
+  if (!renderGuidePDF) {
+    return { ok: false, error: 'guide-pdf.js no está disponible en este deploy (¿pdfkit no terminó de instalar?) — no se puede regenerar ningún PDF.' };
+  }
+  const dropboxToken = await getDropboxAccessToken();
+  const catalogBuf = await dropboxDownload(dropboxToken, `${GUIDES_FOLDER}/guide-catalog.json`);
+  const catalog = JSON.parse(catalogBuf.toString('utf-8'));
+  if (!Array.isArray(catalog.entries)) catalog.entries = [];
+
+  const targets = onlyId ? catalog.entries.filter((e) => e.id === onlyId) : catalog.entries;
+  if (onlyId && targets.length === 0) {
+    return { ok: false, error: `No se encontró ninguna guía con id "${onlyId}" en el catálogo.` };
+  }
+
+  const regenerated = [];
+  const failed = [];
+  for (const entry of targets) {
+    try {
+      const mdBuf = await dropboxDownload(dropboxToken, `${GUIDES_FOLDER}/${entry.tipo}/${entry.archivo}`);
+      const { titulo, subtitulo, bloques } = parseGuideMarkdown(mdBuf.toString('utf-8'));
+      if (!bloques.length) throw new Error('no se pudo reconstruir el contenido en bloques a partir del .md guardado');
+      const buffer = await renderGuidePDF({
+        tipo: entry.tipo, titulo: titulo || entry.titulo, subtitulo, categorias: entry.categorias || [], bloques,
+      });
+      const fname = `${entry.id}.pdf`;
+      await dropboxUpload(dropboxToken, `${GUIDES_FOLDER}/${entry.tipo}/${fname}`, buffer);
+      entry.archivoPdf = fname;
+      regenerated.push(entry.id);
+    } catch (err) {
+      failed.push({ id: entry.id, error: err.message });
+    }
+  }
+
+  if (regenerated.length > 0) {
+    await dropboxUpload(dropboxToken, `${GUIDES_FOLDER}/guide-catalog.json`, Buffer.from(JSON.stringify(catalog, null, 2)));
+  }
+
+  return { ok: failed.length === 0, total: targets.length, regenerated, failed };
+}
+
+module.exports = { runWeeklyGuides, regenerateGuidePdfs };
