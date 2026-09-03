@@ -238,7 +238,15 @@ async function generateGuide(tipo, recentCombos, categories) {
   // premium en formato "bloques". Se sube a 20.000, con margen amplio de
   // verdad esta vez: no cuesta más caro salvo que la guía realmente use
   // esos tokens (se paga por lo que se genera, no por el techo puesto).
-  const maxTokens = tipo === 'premium' ? 20000 : 4500;
+  //
+  // Segundo caso encontrado en la corrida real del 3/9/2026 (run #7): con
+  // las premium ya arregladas (2/2 completas), le tocó el mismo corte a una
+  // guía GRATIS — el mismo error, ahora con max_tokens=4500. Confirma que
+  // 4.500 tampoco era un margen real, era otro número elegido a ojo que
+  // esta vez le alcanzó a la mayoría pero no a todas. Mismo razonamiento
+  // que con la premium: se sube a 8.000 (el doble), lejos todavía del techo
+  // real del modelo.
+  const maxTokens = tipo === 'premium' ? 20000 : 8000;
 
   const depthNote = tipo === 'premium'
     ? 'Es una guía PREMIUM (paga): profundidad real, varios frameworks combinados, ejemplos aplicados paso a paso — tiene que sentirse claramente más valiosa que una guía gratis, no solo más larga.'
