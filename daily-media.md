@@ -28,6 +28,14 @@ También, por ahora, esto solo actúa cuando el guion del día fue de tipo **ree
 
 **Bug real encontrado y corregido (3/9/2026)**: esto no se estaba cumpliendo. `daily-script.js` guarda `tipo: "reel"` para TODAS las entradas de guion corto, sea reel o carrusel — la diferencia real está en el campo `formato`, no en `tipo`. El chequeo de acá solo miraba `tipo`, así que un día de carrusel también pasaba el filtro y terminaba pidiéndole un clip a Higgsfield — justo lo que este mismo párrafo decía que no tenía que pasar. Corregido: ahora también exige `formato === "reel"` (con las entradas viejas del historial, de antes de que existiera ese campo, tratadas como reel — que es lo que siempre fueron).
 
+## El 404 sigue sin resolverse — no es un tema de código
+
+Primera corrida real contra Higgsfield con el modelo "Pro Fast" (3/9/2026, después del plan Plus): mismo 404 que antes. Se revisó la documentación de errores de Higgsfield — un 404 acá significa literalmente "modelo no disponible para esta cuenta", y se confirmó mirando directo el dashboard de `cloud.higgsfield.ai`: la cuenta sigue en 0 créditos, con los mismos dos modelos de imagen de siempre (Soul 2, Soul Cinema), y la pestaña Billing de esa plataforma muestra "No transactions found" — o sea, el plan Plus nunca se pagó ahí. Se confirma lo que ya había explicado soporte (Leo) desde el principio: la plataforma de API es un producto separado, con facturación separada, de la web normal de Higgsfield donde Rodrigo compró Plus. Mientras esta cuenta de API no tenga créditos propios, cualquier modelo de video (no solo "Pro Fast") va a seguir dando 404 — no es algo que se arregle cambiando la ruta del modelo en el código.
+
+## Mientras tanto: el prompt nunca se pierde, aunque el pedido automático falle
+
+Antes, si `submitHiggsfieldClip` fallaba (como con este 404), TODO se perdía — ni siquiera el prompt que Mentis ya había escrito quedaba visible en ningún lado, obligando a reconstruirlo a mano si Rodrigo quería generar el video él mismo. Corregido (3/9/2026): el pedido a Higgsfield ahora está en su propio try/catch — si falla, el prompt se guarda igual en `video-history.json` (con status `"manual — no se pudo pedir automático (<motivo>)"`) y queda visible en el [panel personal](panel.md) igual que uno exitoso. La respuesta de la ruta también cambia: en vez de `ok:false` (que el workflow de GitHub Actions marca en rojo), ahora es `ok:true, submitted:false` con el prompt adentro — no es un error del sistema, es información útil. Así, mientras se resuelve el acceso a la API, Rodrigo puede copiar el prompt del panel y generar el clip a mano en la web de Higgsfield con el plan que ya tiene pago.
+
 ## Qué hace, paso a paso
 
 1. **`POST /internal/daily-media`** (disparado por GitHub Actions, después de que corrió el guion diario):

@@ -245,25 +245,53 @@ async function runDailyMedia(webhookBaseUrl) {
 
   const prompt = buildVisualPrompt(todayEntry);
   const webhookUrl = `${webhookBaseUrl.replace(/\/+$/, '')}/webhook/higgsfield-listo/${webhookSecret}/${dateStr}`;
-  const job = await submitHiggsfieldClip(prompt, webhookUrl);
+
+  // Mientras la cuenta de API de Higgsfield no tenga créditos/modelo
+  // habilitado (3/9/2026 — plan Plus comprado en la web normal, no en
+  // cloud.higgsfield.ai, que sigue en 0), el pedido automático puede fallar.
+  // Antes, si `submitHiggsfieldClip` tiraba error, TODO se perdía — ni
+  // siquiera el prompt quedaba visible en ningún lado, y Rodrigo no tenía
+  // forma de generar el video a mano con lo que Mentis ya escribió. Ahora el
+  // pedido automático se envuelve en su propio try/catch: si falla, el
+  // prompt se guarda igual (con status "manual — no se pudo pedir
+  // automático") para que aparezca en el panel y Rodrigo pueda copiarlo y
+  // generarlo él mismo en la web de Higgsfield con el plan que ya tiene.
+  let job = null;
+  let submitError = null;
+  try {
+    job = await submitHiggsfieldClip(prompt, webhookUrl);
+  } catch (err) {
+    submitError = err.message;
+  }
 
   // Pedido explícito de Rodrigo (2/9/2026): "no veo el prompt del video".
   // Antes esto se armaba y se mandaba a Higgsfield sin dejar rastro en
   // ningún lado — se guarda acá para que quede visible en el panel personal
   // (Módulo 08), igual que ya pasa con el catálogo de guías y el contenido
-  // de texto. Si esto falla, no tiene que tirar abajo el pedido que ya se
-  // mandó — el video se genera igual, solo no queda registrado el prompt.
+  // de texto. Si ESTE guardado falla, no tiene que tirar abajo el pedido que
+  // ya se mandó — el video se genera igual, solo no queda registrado el
+  // prompt (distinto del catch de arriba, que es sobre el pedido a
+  // Higgsfield en sí).
   try {
     const videoHistory = loadVideoHistory();
     videoHistory.entries.push({
       date: dateStr, angulo: todayEntry.angulo, prompt, duration: CLIP_DURATION_SECONDS,
-      requestId: job.request_id, status: job.status, submittedAt: new Date().toISOString(),
+      requestId: job ? job.request_id : null,
+      status: job ? job.status : `manual — no se pudo pedir automático (${submitError})`,
+      submittedAt: new Date().toISOString(),
     });
     saveVideoHistory(videoHistory);
     const dropboxToken2 = await getDropboxAccessToken();
     await dropboxUpload(dropboxToken2, `${CONTENT_FOLDER}/video-history.json`, fs.readFileSync(VIDEO_HISTORY_PATH));
   } catch (err) {
-    console.error('No se pudo guardar el historial de prompts de video (el pedido a Higgsfield sí se mandó):', err.message);
+    console.error('No se pudo guardar el historial de prompts de video:', err.message);
+  }
+
+  if (!job) {
+    return {
+      ok: true, submitted: false, date: dateStr, angulo: todayEntry.angulo, prompt,
+      reason: `No se pudo pedir el clip automáticamente a Higgsfield (${submitError}) — el prompt de arriba ya está guardado y visible en el panel; se puede generar a mano en la web de Higgsfield mientras se resuelve el acceso a la API.`,
+    };
   }
 
   return { ok: true, submitted: true, date: dateStr, angulo: todayEntry.angulo, prompt, requestId: job.request_id, status: job.status };
