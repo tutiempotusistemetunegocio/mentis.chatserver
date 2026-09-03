@@ -154,15 +154,25 @@ ${recentAngles}
 
 Basate en todo el conocimiento cargado más abajo — combiná lo que haga falta (marketing, mentalidad, ventas, redes, lo que aplique), como lo haría alguien que domina todas esas áreas a la vez.
 
-Además del guion completo (pensado para narrarse en 30-60s), describí por separado una escena visual para el clip de video que se genera con IA a partir de esto: ese clip dura como máximo 12 segundos y es mudo (sin narración, sin diálogo, sin texto en pantalla), así que tiene que ser a propósito UN SOLO momento o toma concreta — nunca una secuencia de varias escenas ni algo que necesite más de 12 segundos para leerse o tener sentido. Condensá el gancho central de hoy en esa única imagen. Escribila directamente en inglés, lista para usarse tal cual como prompt de generación de video (describí solo lo que la cámara ve — acción, ambiente, iluminación — nunca diálogo ni texto en pantalla).
+Además del guion completo (pensado para narrarse en 30-60s), describí por separado una escena visual para el clip de video que se genera con IA a partir de esto: ese clip dura como máximo 12 segundos y es mudo (sin narración, sin diálogo, sin texto en pantalla), así que tiene que ser a propósito UN SOLO momento o toma concreta — nunca una secuencia de varias escenas ni algo que necesite más de 12 segundos para leerse o tener sentido. Condensá el gancho central de hoy en esa única imagen.
+
+Lo más importante de esta escena es el CONTENIDO, no el estilo: tiene que mostrar una acción concreta directamente relacionada con el ángulo/gancho de hoy — alguien haciendo algo específico que dramatice ese gancho (ej. si el gancho es sobre disciplina y hábitos, no alcanza con "alguien trabajando de noche": mostrá la acción puntual que representa eso — apagando el teléfono para volver a escribir, tachando una tarea en una libreta, etc.). Empezá describiendo ESA acción concreta en una frase, y recién después sumá 1-2 detalles de ambiente/iluminación si hacen falta — nunca al revés, y nunca una escena que sea solo ambiente/mood sin ninguna acción puntual. Escribila directamente en inglés, lista para usarse tal cual como prompt de generación de video (describí solo lo que la cámara ve — acción, ambiente, iluminación — nunca diálogo ni texto en pantalla).
+
+Además, para cuando el clip se genere a mano en la interfaz completa de Higgsfield (la que sí arma música y captions, a diferencia de la API que solo genera el video mudo), describí dos cosas más:
+- "captionText": el texto EXACTO que tiene que aparecer en pantalla como caption/overlay durante el clip — corto (una frase, pensado para leerse en los 12s del clip), en español, el gancho central de hoy condensado a su forma más directa y llamativa (no el guion completo, no la CTA — solo el gancho, como titular).
+- "musicStyle": el tipo de música de fondo que mejor acompaña el tono de hoy — corto, en inglés, como se describiría a una herramienta de generación (ej. "tense minimal piano, slow build" o "upbeat motivational synth, driving rhythm"), coherente con la energía del ángulo de hoy.
 
 Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
-{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "escenaVisual": "<en inglés, la escena única de hasta 12s descripta arriba>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<call to action del final, ej. invitar a comentar la palabra clave>"}
+{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "escenaVisual": "<en inglés, la escena única de hasta 12s descripta arriba>", "captionText": "<en español, el texto exacto del caption en pantalla>", "musicStyle": "<en inglés, el estilo de música de fondo>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<call to action del final, ej. invitar a comentar la palabra clave>"}
 
 --- CONOCIMIENTO DE MENTIS ---
 ${fullKnowledgeSnapshot()}`;
 
-  return callMentis(prompt, 2000);
+  // 2000 -> 2500 (3/9/2026): se sumaron dos campos más al JSON de salida
+  // (captionText, musicStyle) — mismo motivo que las subidas anteriores en
+  // weekly-guides.js: más margen que lo justo, para no repetir el bug real
+  // de truncamiento que ya pasó ahí dos veces.
+  return callMentis(prompt, 2500);
 }
 
 async function generatePodcastScript(dateStr, history) {
@@ -226,7 +236,12 @@ async function runDailyScript() {
       const fname = `${dateStr}-${reel.formato === 'carrusel' ? 'carrusel' : 'reel'}.md`;
       const body = `# ${dateStr} — ${reel.formato}\n\n**Ángulo:** ${reel.angulo}\n\n---\n\n${reel.guion}\n\n---\n\n**CTA:** ${reel.cta}\n`;
       fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
-      history.entries.push({ date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo, escenaVisual: reel.escenaVisual || null });
+      history.entries.push({
+        date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo,
+        escenaVisual: reel.escenaVisual || null,
+        captionText: reel.captionText || null,
+        musicStyle: reel.musicStyle || null,
+      });
       generated.push(fname);
     } catch (err) {
       failures.push({ tipo: 'reel', error: err.message });

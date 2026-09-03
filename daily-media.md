@@ -1,5 +1,23 @@
 # Video diario — Módulo 03 → clip generado con Higgsfield
 
+## Actualización (3/9/2026): contenido del prompt reordenado, foto del día conectada, música/captions siguen sin construir
+
+Tres pedidos de Rodrigo en el mismo mensaje, tratados por separado:
+
+**1. "El prompt solo dice de las cámaras, no veo el contenido"** — cierto: `buildVisualPrompt()` armaba el prompt con dos bloques de lenguaje técnico de cámara/cinematografía (uno antes, uno después) y la `escenaVisual` (el contenido temático real, escrito por Mentis) quedaba metida en el medio, más fácil de pasar por alto al leerlo. Corregido en dos lugares:
+- `daily-script.js`: la instrucción que le da a Mentis para escribir `escenaVisual` ahora pide explícitamente una ACCIÓN CONCRETA relacionada al ángulo de hoy (no solo un ambiente/mood), con un ejemplo de qué significa eso.
+- `daily-media.js`: `buildVisualPrompt()` ahora arranca siempre con `escenaVisual` (el contenido) y deja el lenguaje de estilo/cámara/calidad como modificador al final, no al revés. No cambia lo que se le pide a Higgsfield en el fondo, cambia el orden y el peso relativo.
+
+**2. "El reel siempre trabaje con una foto mía o una cualquiera"** — construido: `daily-photo.js` (Módulo 03, ya elegía la foto del día para uso manual) corre antes que este módulo (10:40 UTC vs. 10:45). `daily-media.js` ahora busca esa elección en `photo-history.json` y, si hay una foto para hoy, le pide a Higgsfield el clip con el endpoint **image-to-video** de Seedance Pro Fast (confirmado en la documentación pública: mismos parámetros que texto-a-video, más un `image_url` obligatorio) en vez de texto-a-video puro — usando un link temporal de Dropbox (`files/get_temporary_link`, válido 4h) para que Higgsfield pueda bajar la foto sin que haga falta subirla a ningún lado. Si por lo que sea no hay foto de hoy (todavía no se subió ninguna a la carpeta de medios, `daily-photo.js` no corrió, o falla el link temporal), sigue funcionando como antes (texto-a-video) — nunca bloquea el pedido. El panel ahora muestra qué foto se usó (o si no se usó ninguna) junto a cada prompt.
+
+**3. "Música y captions, el sistema lo puede hacer con Higgsfield"** — la primera vuelta de esto decía que no, en base a la documentación pública de la **API** (`docs.higgsfield.ai/docs/openapi.json`), que confirmado de nuevo no tiene ningún endpoint de audio, subtítulos ni superposición de texto: la API solo genera el clip mudo, sin texto.
+
+**Corrección (3/9/2026, aclaración de Rodrigo)**: el plan que paga ("Plus") es el de la **interfaz web de consumo** de Higgsfield, no el de la API — son productos separados (ver la sección del 404 más abajo, donde ya se había visto esta distinción para el billing). En esa interfaz web, según Rodrigo, dándole la instrucción en el prompt, el propio Higgsfield arma música y captions como parte de la generación — no hace falta editar el video después con ffmpeg ni nada por el estilo.
+
+Con eso, se agregaron dos campos nuevos a lo que genera Mentis en `daily-script.js` — `captionText` (el texto exacto del caption, en español, corto) y `musicStyle` (el estilo de música de fondo, en inglés) — y `daily-media.js` arma un **segundo prompt** (`buildManualHiggsfieldPrompt`, guardado como `promptCompleto`) que suma esas dos instrucciones al prompt visual, pensado para copiarse tal cual en la interfaz web. El prompt que usa el pedido automático a la API (`prompt`, sin cambios) sigue siendo el mudo/sin texto de siempre — la API no soporta esto y pedírselo podría hacer que intente "dibujar" texto sin tipografía real, saliendo ilegible.
+
+**Caveat honesto que sigue en pie**: no hay documentación pública de la interfaz web de consumo (solo de la API) para confirmar que de verdad interpreta instrucciones de música/captions escritas en el prompt — es la palabra de Rodrigo sobre su propia cuenta. La forma real de confirmarlo es probarlo una vez con el `promptCompleto` que ahora aparece en el [panel](panel.md) y ver qué sale.
+
 ## Historial del 404 persistente — resuelto, falta la última confirmación
 
 Después de ida y vuelta con soporte de Higgsfield sobre un 404 que no se iba, se confirmó la causa real mirando directamente el dashboard de la cuenta (`cloud.higgsfield.ai`): la API de Higgsfield es una plataforma separada del plan de la web, y la cuenta de Rodrigo nunca había activado esa parte — 0 créditos, y los únicos dos modelos habilitados eran Soul 2 y Soul Cinema, los dos de generación de imagen, ninguno de video. Por eso todo pedido fallaba, sin importar qué modelo de video se pidiera.
@@ -41,7 +59,7 @@ Antes, si `submitHiggsfieldClip` fallaba (como con este 404), TODO se perdía �
 1. **`POST /internal/daily-media`** (disparado por GitHub Actions, después de que corrió el guion diario):
    - Trae el historial de contenido más reciente de Dropbox.
    - Busca la entrada de hoy con `tipo: "reel"` Y `formato: "reel"` (ver el bug corregido más abajo). Si no hay (fin de semana, carrusel, o el guion diario todavía no corrió), no pide nada — responde `submitted: false` con el motivo.
-   - Si hay, arma un prompt visual corto a partir del ángulo del guion y le pide a Higgsfield un clip vertical de 10s (modelo Seedance Pro Fast — cambiar de modelo es una línea en `daily-media.js`).
+   - Si hay, arma un prompt visual corto a partir del ángulo del guion (con el contenido temático primero, el estilo cinematográfico después) y le pide a Higgsfield un clip vertical de 12s (modelo Seedance Pro Fast — cambiar de modelo es una línea en `daily-media.js`). Si `daily-photo.js` ya eligió una foto para hoy, el pedido usa esa foto como imagen de partida (image-to-video); si no, es texto-a-video puro.
    - Responde con el `request_id` del pedido. El clip en sí todavía no está listo en este momento — Higgsfield tarda en generarlo.
 
 2. **`POST /webhook/higgsfield-listo/<secreto>/<fecha>`** (Higgsfield llama acá solo cuando termina):
@@ -69,6 +87,6 @@ El clip queda en la misma carpeta `/mentis-contenido` de Dropbox donde ya están
 
 ## Lo que falta para que este paso quede completo
 
-- **Armado del reel completo**: hoy esto entrega un clip corto de gancho, no el video final montado — falta la edición (varios clips + carpeta de medios + texto en pantalla).
-- **Carpeta de medios**: el plano prevé que el sistema también elija material ya existente de una carpeta que Rodrigo va llenando — no construido todavía.
+- **Armado del reel completo**: hoy esto entrega un clip corto de gancho, no el video final montado — falta la edición (varios clips) para cuando se quiera algo más largo que 12s.
+- **Música y captions**: el sistema ya arma el `promptCompleto` con las instrucciones (ver la actualización del 3/9/2026 arriba) — falta la primera confirmación real de Rodrigo probándolo en la interfaz web de Higgsfield, para saber si hace falta ajustar el texto.
 - **Control de calidad pre-publicación**: analizar el clip ya generado y decidir si tiene potencial antes de usarlo — depende de que el armado final exista primero.

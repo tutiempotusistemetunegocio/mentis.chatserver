@@ -154,9 +154,12 @@ async function renderPanel(secret) {
       <h3 class="mt">Prompt de video del día <span class="count">lo que se le pide a Higgsfield, no solo el resultado</span></h3>
       ${recentVideoPrompts.length ? recentVideoPrompts.map((e) => `
         <div class="promptcard">
-          <div class="promptmeta"><span class="dim">${esc(e.date)}</span> · ${esc(e.duration || '')}s · <span class="dim">${esc(e.status || '')}</span></div>
+          <div class="promptmeta"><span class="dim">${esc(e.date)}</span> · ${esc(e.duration || '')}s · <span class="dim">${esc(e.status || '')}</span>${e.photoUsed ? ` · <span class="dim">foto: ${esc(e.photoUsed)}</span>` : ''}</div>
           <div class="promptangulo">${esc(e.angulo || '')}</div>
-          <pre class="promptbox">${esc(e.prompt || '')}</pre>
+          <p class="dim mt">Prompt completo — pegar tal cual en la interfaz web de Higgsfield (plan Plus): incluye música y captions.</p>
+          <pre class="promptbox">${esc(e.promptCompleto || e.prompt || '')}</pre>
+          ${e.captionText || e.musicStyle ? `<p class="dim">${e.captionText ? `Caption: "${esc(e.captionText)}"` : ''}${e.captionText && e.musicStyle ? ' · ' : ''}${e.musicStyle ? `Música: ${esc(e.musicStyle)}` : ''}</p>` : ''}
+          <details class="mt"><summary class="dim">Prompt técnico (el que usa el pedido automático a la API, sin música/captions)</summary><pre class="promptbox">${esc(e.prompt || '')}</pre></details>
         </div>`).join('') : '<p class="dim">Sin datos todavía — se guarda a partir del primer pedido de video después de este cambio.</p>'}
     </section>`;
 

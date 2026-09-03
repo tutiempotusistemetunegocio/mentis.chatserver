@@ -48,6 +48,34 @@
 //  2. Si es "failed" o "nsfw", no rompe nada — deja constancia en la
 //     respuesta para que quede en el log de la corrida, y Rodrigo sigue
 //     teniendo el guion en texto aunque el clip no haya salido.
+//
+// Foto del día (agregado 3/9/2026, pedido explícito de Rodrigo — "que el
+// reel trabaje siempre con una foto mía o una cualquiera"): daily-photo.js
+// (corre antes, 10:40 UTC) ya elige una foto de la carpeta de medios que
+// conecta con el ángulo de hoy. Este módulo la busca en photo-history.json y,
+// si existe, pide el clip con el endpoint image-to-video de Higgsfield en
+// vez de texto-a-video (mismo prompt, más `image_url` con un link temporal
+// de Dropbox de esa foto — confirmado contra la documentación pública de
+// Higgsfield, ver el comentario junto a HIGGSFIELD_IMAGE_MODEL_PATH). Si no
+// hay foto de hoy por cualquier motivo, sigue funcionando como antes
+// (texto-a-video) — nunca bloquea el pedido.
+//
+// Música y captions (actualizado 3/9/2026): la API (docs.higgsfield.ai/docs/
+// openapi.json, revisada de nuevo) NO tiene ningún endpoint para agregar
+// audio, subtítulos ni texto superpuesto — solo genera el clip mudo, sin
+// texto, como ya se le pide en `buildVisualPrompt`. Rodrigo aclaró que el
+// plan que paga (Plus) es el de la INTERFAZ WEB de consumo de Higgsfield,
+// no la API — y que ahí, dándole la instrucción en el prompt, la propia
+// interfaz arma música y captions como parte de la generación (no hace
+// falta editar el video después). Por eso `buildManualHiggsfieldPrompt`
+// (ver más abajo) arma un segundo prompt — separado del que usa el pedido
+// automático a la API — con instrucciones explícitas de música y el texto
+// exacto del caption, pensado para copiarse a mano en esa interfaz.
+// Caveat honesto: esto no se pudo confirmar contra ninguna documentación
+// pública (la única disponible es la de la API, que no cubre la interfaz
+// web) — es la palabra de Rodrigo sobre su propia cuenta, y la forma real de
+// confirmarlo es que lo pruebe una vez con el prompt completo y cuente qué
+// pasó.
 
 const fs = require('fs');
 const path = require('path');
@@ -56,6 +84,12 @@ const { getDropboxAccessToken } = require('./dropbox-auth');
 const CONTENT_DIR = path.join(__dirname, 'contenido');
 const HISTORY_PATH = path.join(__dirname, 'content-history.json');
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
+// Misma carpeta que usa daily-photo.js (Módulo 03 → foto del día) — se lee
+// acá también, de solo lectura, para saber si hoy ya se eligió una foto y
+// poder pedirle a Higgsfield un clip a partir de ELLA (image-to-video) en
+// vez de solo texto. Ver el comentario largo sobre esto más abajo, junto a
+// PHOTO_HISTORY_PATH.
+const MEDIA_FOLDER = process.env.DROPBOX_MEDIA_FOLDER || '/mentis-medios';
 const HIGGSFIELD_API_BASE = 'https://api.higgsfield.ai';
 // REACTIVADO (2/9/2026): Rodrigo pasó su cuenta de Higgsfield al plan Plus
 // (1.200 créditos/mes, "acceso completo a todos los modelos Seedance"), que
@@ -77,6 +111,18 @@ const HIGGSFIELD_API_BASE = 'https://api.higgsfield.ai';
 // disparar /internal/daily-media a mano una vez (o esperar al próximo 10:45
 // UTC) y confirmar que ya no da 404 antes de darlo por resuelto del todo.
 const HIGGSFIELD_MODEL_PATH = '/bytedance/seedance/v1/pro/fast/text-to-video';
+// Pedido explícito de Rodrigo (3/9/2026): que el reel siempre trabaje con
+// una foto suya (o cualquier otra) en vez de generar el clip de la nada.
+// Confirmado contra la documentación pública de Higgsfield (docs.higgsfield.ai,
+// revisado 3/9/2026): Seedance Pro Fast tiene una variante "image-to-video"
+// (misma familia que la de texto, mismos parámetros de duración/resolución/
+// aspect_ratio, más un `image_url` obligatorio) — no hace falta subir el
+// archivo a Higgsfield, solo darle una URL desde donde puedan bajarlo ellos.
+const HIGGSFIELD_IMAGE_MODEL_PATH = '/bytedance/seedance/v1/pro/fast/image-to-video';
+// Catálogo/historial de fotos que arma daily-photo.js — se leen acá para
+// saber si HOY ya se eligió una foto (ver runDailyMedia). Este archivo no
+// escribe nunca en photo-history.json, solo lo lee.
+const PHOTO_HISTORY_PATH = path.join(__dirname, 'photo-history.json');
 // Rodrigo pidió (2/9/2026) que los clips tengan 25s. No es posible: la
 // documentación pública de la API de Higgsfield (revisada de nuevo hoy)
 // dice explícitamente que Seedance acepta `duration` entre 2 y 12 segundos
@@ -121,6 +167,23 @@ async function dropboxUpload(token, dropboxPath, buffer) {
   if (!res.ok) throw new Error(`HTTP ${res.status} subiendo ${dropboxPath}`);
 }
 
+// Higgsfield no acepta un archivo subido directamente — el campo
+// `image_url` de su endpoint image-to-video tiene que ser una URL que ELLOS
+// puedan bajar. Dropbox da justo eso con `files/get_temporary_link`: un link
+// directo de descarga, sin login, que dura 4 horas (de sobra para que
+// Higgsfield la baje al toque de recibir el pedido).
+async function dropboxGetTemporaryLink(token, dropboxPath) {
+  const res = await fetch('https://api.dropboxapi.com/2/files/get_temporary_link', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ path: dropboxPath }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error((data.error_summary) || `HTTP ${res.status} pidiendo el link temporal de ${dropboxPath}`);
+  return data.link;
+}
+
 function loadHistory() {
   if (!fs.existsSync(HISTORY_PATH)) return { entries: [] };
   try {
@@ -162,9 +225,48 @@ function higgsfieldAuthHeader() {
 // en inglés por Mentis, pensada específicamente para 12s) cuando existe.
 // `entry.angulo` queda como respaldo solo para entradas viejas, generadas
 // antes de este cambio, que no tienen escenaVisual guardada.
+//
+// REORDENADO (3/9/2026, pedido explícito de Rodrigo: "no veo el contenido,
+// solo dice de las cámaras"): antes, `escena` iba metida en el medio de dos
+// bloques de lenguaje técnico (cinematografía primero, calidad/silencio
+// después) — el contenido temático estaba, pero enterrado. Ahora `escena`
+// (el contenido de hoy) va SIEMPRE primero, como la frase que abre el
+// prompt, y el lenguaje de estilo/cámara/calidad va después como
+// modificador — no al revés. Esto no cambia lo que se le pide a Higgsfield
+// en el fondo, solo el orden y el peso relativo, para que el contenido
+// temático sea lo primero que el modelo (y cualquiera que lea el prompt en
+// el panel) vea.
 function buildVisualPrompt(entry) {
   const escena = entry.escenaVisual || `Visual hook for the theme: "${entry.angulo}".`;
-  return `Cinematic, high-production-value vertical video for a social media reel — think film-grade cinematography: deliberate camera movement (slow push-in, tracking, or handheld with purpose), dramatic natural lighting, shallow depth of field. ${escena} Realistic, professional, high-energy footage suitable as a single 12-second shot. Silent footage, no dialogue, no voiceover, no on-screen text, no logos, no watermarks.`;
+  return `${escena} Shot in a cinematic, high-production-value style for a vertical social media reel — deliberate camera movement (slow push-in, tracking, or handheld with purpose), dramatic natural lighting, shallow depth of field, realistic and professional. Silent footage, no dialogue, no voiceover, no on-screen text, no logos, no watermarks.`;
+}
+
+// Agregado (3/9/2026, pedido explícito de Rodrigo): "el prompt me diga todo
+// — tipo de música, qué captions poner, cuáles son" — porque, a diferencia
+// de la API (que solo genera el clip mudo, sin texto — confirmado contra la
+// documentación pública, ver la nota grande al principio del archivo), la
+// interfaz completa de Higgsfield en la web (la del plan Plus que Rodrigo
+// pagó ahí) sí puede armar música y captions cuando se le da la instrucción
+// en el prompt. Esto es un prompt DISTINTO al de arriba, pensado para
+// pegarse a mano en esa interfaz web, no para el pedido automático a la API:
+// le suma instrucciones de música y el texto exacto del caption, cosas que
+// el pedido automático a la API ignoraría en el mejor de los casos (no las
+// soporta) o podría interpretar mal en el peor (intentar "dibujar" texto en
+// el clip sin la tipografía real de un editor, que suele salir ilegible).
+// Por eso `buildVisualPrompt` de arriba se sigue usando tal cual para el
+// pedido automático, y este solo se guarda para mostrarse en el panel.
+//
+// Honesto: no hay forma de confirmar desde acá si la interfaz de Higgsfield
+// realmente interpreta instrucciones de música/captions escritas así dentro
+// del prompt (la documentación pública que se pudo revisar es la de la API,
+// que no cubre la interfaz web de consumo) — la forma de confirmarlo es que
+// Rodrigo lo pruebe una vez y cuente qué pasó, mismo criterio que se usó
+// para todo lo demás en este proyecto.
+function buildManualHiggsfieldPrompt(entry) {
+  const base = buildVisualPrompt(entry).replace(/ Silent footage, no dialogue, no voiceover, no on-screen text, no logos, no watermarks\.$/, '');
+  const caption = entry.captionText ? `\n\nAdd on-screen text/captions displaying exactly: "${entry.captionText}"` : '';
+  const music = entry.musicStyle ? `\n\nBackground music: ${entry.musicStyle}.` : '';
+  return `${base} No dialogue, no voiceover, no logos, no watermarks.${caption}${music}`;
 }
 
 function loadVideoHistory() {
@@ -182,23 +284,61 @@ function saveVideoHistory(history) {
   fs.writeFileSync(VIDEO_HISTORY_PATH, JSON.stringify(history, null, 2));
 }
 
-async function submitHiggsfieldClip(prompt, webhookUrl) {
+// imageUrl es opcional: cuando viene (foto de hoy ya elegida por
+// daily-photo.js, con link temporal de Dropbox), se usa el endpoint
+// image-to-video en vez del de solo texto — mismos demás parámetros.
+async function submitHiggsfieldClip(prompt, webhookUrl, imageUrl) {
   const auth = higgsfieldAuthHeader();
-  const url = `${HIGGSFIELD_API_BASE}${HIGGSFIELD_MODEL_PATH}?hf_webhook=${encodeURIComponent(webhookUrl)}`;
+  const modelPath = imageUrl ? HIGGSFIELD_IMAGE_MODEL_PATH : HIGGSFIELD_MODEL_PATH;
+  const url = `${HIGGSFIELD_API_BASE}${modelPath}?hf_webhook=${encodeURIComponent(webhookUrl)}`;
+  const body = {
+    prompt,
+    duration: CLIP_DURATION_SECONDS,
+    resolution: 1080,
+    aspect_ratio: '9:16',
+  };
+  if (imageUrl) body.image_url = imageUrl;
   const res = await fetch(url, {
     method: 'POST',
     headers: { Authorization: auth, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt,
-      duration: CLIP_DURATION_SECONDS,
-      resolution: 1080,
-      aspect_ratio: '9:16',
-    }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS),
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status} pidiendo el clip a Higgsfield`);
   return data; // { status, request_id, status_url, cancel_url }
+}
+
+// Busca si HOY ya se eligió una foto (daily-photo.js corre antes, a las
+// 10:40 UTC — este módulo corre después) y devuelve un link temporal de
+// Dropbox para esa foto, listo para pasarle a Higgsfield como `image_url`.
+// Devuelve null (nunca tira error) ante cualquier problema — sin foto de
+// hoy, con foto pero sin poder pedir el link, historial corrupto, etc. — el
+// pedido de video sigue andando igual, solo que como texto-a-video en vez de
+// imagen-a-video. No es un fallback silencioso sin dejar rastro: el llamador
+// (runDailyMedia) registra en video-history.json si se usó foto o no.
+async function findTodayPhotoUrl(dropboxToken, dateStr) {
+  try {
+    const buf = await dropboxDownload(dropboxToken, `${MEDIA_FOLDER}/photo-history.json`);
+    fs.writeFileSync(PHOTO_HISTORY_PATH, buf);
+  } catch {
+    return null; // daily-photo.js todavía no corrió nunca, o no hay nada elegido
+  }
+  let photoHistory;
+  try {
+    photoHistory = JSON.parse(fs.readFileSync(PHOTO_HISTORY_PATH, 'utf-8'));
+  } catch {
+    return null;
+  }
+  const entries = Array.isArray(photoHistory.entries) ? photoHistory.entries : [];
+  const todayPhoto = entries.find((e) => e.date === dateStr && e.file);
+  if (!todayPhoto) return null;
+  try {
+    const link = await dropboxGetTemporaryLink(dropboxToken, `${MEDIA_FOLDER}/${todayPhoto.file}`);
+    return { file: todayPhoto.file, url: link };
+  } catch {
+    return null; // el link temporal falló — seguimos sin foto, no rompemos el pedido
+  }
 }
 
 // Paso 1: dispara el pedido del clip. webhookBaseUrl es la URL pública del
@@ -244,7 +384,20 @@ async function runDailyMedia(webhookBaseUrl) {
   }
 
   const prompt = buildVisualPrompt(todayEntry);
+  // Prompt aparte, para pegar a mano en la interfaz web de Higgsfield (plan
+  // Plus) — incluye música y captions, que la API no soporta. Ver el
+  // comentario largo junto a buildManualHiggsfieldPrompt.
+  const promptCompleto = buildManualHiggsfieldPrompt(todayEntry);
   const webhookUrl = `${webhookBaseUrl.replace(/\/+$/, '')}/webhook/higgsfield-listo/${webhookSecret}/${dateStr}`;
+
+  // Pedido explícito de Rodrigo (3/9/2026): que el reel siempre trabaje con
+  // una foto (suya u otra) en vez de generarse de la nada. daily-photo.js
+  // corre antes (10:40 UTC) y elige la foto del día en photo-history.json —
+  // acá se busca esa elección y, si existe, se pide el video a partir de
+  // ELLA (image-to-video). Si no hay foto de hoy por lo que sea (todavía no
+  // se subió ninguna, daily-photo.js no corrió, falló el link temporal), se
+  // sigue pidiendo el clip de texto como antes — no bloquea nada.
+  const todayPhoto = await findTodayPhotoUrl(dropboxToken, dateStr);
 
   // Mientras la cuenta de API de Higgsfield no tenga créditos/modelo
   // habilitado (3/9/2026 — plan Plus comprado en la web normal, no en
@@ -259,7 +412,7 @@ async function runDailyMedia(webhookBaseUrl) {
   let job = null;
   let submitError = null;
   try {
-    job = await submitHiggsfieldClip(prompt, webhookUrl);
+    job = await submitHiggsfieldClip(prompt, webhookUrl, todayPhoto ? todayPhoto.url : null);
   } catch (err) {
     submitError = err.message;
   }
@@ -275,9 +428,12 @@ async function runDailyMedia(webhookBaseUrl) {
   try {
     const videoHistory = loadVideoHistory();
     videoHistory.entries.push({
-      date: dateStr, angulo: todayEntry.angulo, prompt, duration: CLIP_DURATION_SECONDS,
+      date: dateStr, angulo: todayEntry.angulo, prompt, promptCompleto, duration: CLIP_DURATION_SECONDS,
+      captionText: todayEntry.captionText || null,
+      musicStyle: todayEntry.musicStyle || null,
       requestId: job ? job.request_id : null,
       status: job ? job.status : `manual — no se pudo pedir automático (${submitError})`,
+      photoUsed: todayPhoto ? todayPhoto.file : null,
       submittedAt: new Date().toISOString(),
     });
     saveVideoHistory(videoHistory);
@@ -289,12 +445,17 @@ async function runDailyMedia(webhookBaseUrl) {
 
   if (!job) {
     return {
-      ok: true, submitted: false, date: dateStr, angulo: todayEntry.angulo, prompt,
-      reason: `No se pudo pedir el clip automáticamente a Higgsfield (${submitError}) — el prompt de arriba ya está guardado y visible en el panel; se puede generar a mano en la web de Higgsfield mientras se resuelve el acceso a la API.`,
+      ok: true, submitted: false, date: dateStr, angulo: todayEntry.angulo, prompt, promptCompleto,
+      photoUsed: todayPhoto ? todayPhoto.file : null,
+      reason: `No se pudo pedir el clip automáticamente a Higgsfield (${submitError}) — el "promptCompleto" de arriba (con música y captions incluidos) ya está guardado y visible en el panel, listo para pegar a mano en la interfaz web de Higgsfield (plan Plus)${todayPhoto ? `, junto con la foto "${todayPhoto.file}" como referencia si querés mantener el mismo resultado` : ''}.`,
     };
   }
 
-  return { ok: true, submitted: true, date: dateStr, angulo: todayEntry.angulo, prompt, requestId: job.request_id, status: job.status };
+  return {
+    ok: true, submitted: true, date: dateStr, angulo: todayEntry.angulo, prompt, promptCompleto,
+    photoUsed: todayPhoto ? todayPhoto.file : null,
+    requestId: job.request_id, status: job.status,
+  };
 }
 
 // Paso 2: llamado desde server.js cuando Higgsfield avisa que el clip
