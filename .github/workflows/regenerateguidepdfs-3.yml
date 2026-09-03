@@ -1,0 +1,76 @@
+name: Regenerar PDFs de guías
+
+# Herramienta puntual, NO recurrente (sin `schedule`, solo se dispara a
+# mano) — vuelve a armar el PDF de las guías que ya existen en el catálogo,
+# a partir del mismo .md ya guardado en Dropbox (nunca le pide contenido
+# nuevo a Mentis). Pensada para el día que se corrige un bug de armado en
+# guide-pdf.js (como el de las páginas en blanco del 3/9/2026) y los PDFs
+# viejos, ya entregados con el bug, también necesitan rehacerse — no solo
+# las guías nuevas de acá en adelante.
+#
+# Configuración: usa los mismos dos secrets que "Guías semanales de Mentis"
+# (MENTIS_GUIDES_URL, MENTIS_GUIDES_SECRET) — es el mismo módulo, no hace
+# falta cargar nada nuevo en GitHub. La URL de este workflow se arma
+# recortando "weekly-guides" del final de MENTIS_GUIDES_URL y pegando
+# "regenerate-guide-pdfs" en su lugar (mismo servidor, otra ruta).
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  regenerar:
+    runs-on: ubuntu-latest
+    env:
+      MENTIS_GUIDES_URL: ${{ secrets.MENTIS_GUIDES_URL }}
+      MENTIS_GUIDES_SECRET: ${{ secrets.MENTIS_GUIDES_SECRET }}
+    steps:
+      - name: Regenerar todos los PDFs del catálogo
+        run: |
+          url="${MENTIS_GUIDES_URL%weekly-guides}regenerate-guide-pdfs"
+          echo "Llamando a: $url"
+          # BUG REAL encontrado en la primera corrida (2/9/2026): el
+          # servidor gratis de Render se apaga solo después de 15 min sin
+          # uso, y mientras arranca de nuevo a veces devuelve SU PROPIA
+          # página de "despertando" — pero con código HTTP 200, no un 502 de
+          # verdad. Un chequeo que solo mira el código HTTP (o el --retry de
+          # curl, que también decide solo por el código) no detecta esto: el
+          # workflow marcaba éxito en verde aunque en realidad nunca había
+          # llegado a tocar el servidor real. La única forma confiable de
+          # saber si la respuesta es de nuestro servidor es mirar el
+          # CONTENIDO: nuestras rutas siempre devuelven JSON (empieza con
+          # "{"), la página de Render no. Por eso acá se reintenta hasta 6
+          # veces, esperando a que el cuerpo sea JSON de verdad — no alcanza
+          # con que el código HTTP diga 200.
+          attempt=1
+          max_attempts=6
+          body=""
+          code=""
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Intento $attempt de $max_attempts..."
+            response=$(curl -s -w "\n%{http_code}" --max-time 600 -X POST "$url" \
+              -H "x-guides-secret: $MENTIS_GUIDES_SECRET" \
+              -H "content-type: application/json" \
+              -d '{}')
+            curl_exit=$?
+            body=$(echo "$response" | head -n -1)
+            code=$(echo "$response" | tail -n 1)
+            first_char=$(echo "$body" | head -c 1)
+            if [ "$curl_exit" -eq 0 ] && [ "$first_char" = "{" ]; then
+              break
+            fi
+            echo "Todavía no es una respuesta real del servidor (probablemente Render sigue despertando) — esperando 20s y reintentando."
+            sleep 20
+            attempt=$((attempt + 1))
+          done
+
+          echo "HTTP $code"
+          echo "$body"
+
+          if [ "$(echo "$body" | head -c 1)" != "{" ]; then
+            echo "La regeneración de PDFs falló — el servidor nunca respondió con JSON real después de $max_attempts intentos (no es el problema de siempre de 'estaba dormido' — revisá si Render está caído de verdad)."
+            exit 1
+          fi
+          if [ "$code" -ge 400 ]; then
+            echo "La regeneración de PDFs falló — revisá el mensaje de arriba."
+            exit 1
+          fi
