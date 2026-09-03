@@ -27,3 +27,7 @@ Lo que aprendió ayer, o antepayer, sigue vigente — aprender algo nuevo nunca 
 - Viernes: oferta directa
 - Sábado: tu por qué
 - Domingo: antes / después
+
+## Ajustes de estrategia
+(Sección agregada el 3/9/2026, pedido explícito de Rodrigo: "cada vez que se carga nueva información, él se actualice también de forma a que ajuste la estrategia" — a diferencia del bloque de arriba, que el Módulo 07 reescribe con datos de rendimiento real de Metricool, este bloque lo escribe `daily-ingest.js` mismo, cada vez que un documento nuevo enseña algo real: después de sumar los principios nuevos a las categorías que corresponda, Mentis se pregunta si eso cambia algo de la estrategia central — no del conocimiento de un tema puntual, sino de CÓMO se vende (el enfoque, no solo el contenido). La mayoría de las corridas no agregan nada acá — solo cuando hay un ajuste real y accionable. Mismo principio de siempre: nunca se borra una línea de acá, si algo queda superado se marca `[desactualizado: motivo]` en vez de eliminarse.
+(Todavía sin ajustes propios — vacío hasta el primer documento que motive uno.)
