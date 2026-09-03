@@ -357,7 +357,23 @@ async function runWeeklyGuides() {
         if (cats.length < 2) throw new Error('Mentis devolvió menos de 2 categorías válidas para la guía — no se guardó.');
         if (!Array.isArray(result.bloques) || result.bloques.length === 0) throw new Error('Mentis no devolvió bloques de contenido válidos para la guía — no se guardó.');
 
-        const id = `${dateStr}-${tipo}-${slugify(result.titulo)}`;
+        // BUG REAL encontrado en auditoría (3/9/2026): el id (y por lo tanto
+        // el nombre del archivo) se arma solo con fecha+tipo+título — nada
+        // impedía que dos guías del MISMO tipo generadas en la MISMA corrida
+        // (ej. las 2 premium de hoy) terminaran con títulos que, una vez
+        // "slugificados", dieran el mismo id. Cuando eso pasa, la segunda
+        // guía sobreescribe el .md de la primera en disco ANTES de subir
+        // nada (mismo nombre de archivo) y el catálogo queda con dos
+        // entradas iguales en id apuntando al mismo archivo — la primera
+        // guía generada (y ya pagada como llamada a la API) desaparece en
+        // silencio. Un sufijo corto random cuando hay choque es más barato
+        // y más simple que pedirle unicidad a Mentis, y no cambia el id de
+        // ninguna guía ya existente (el catálogo entero, no solo esta
+        // corrida, es lo que se chequea).
+        let id = `${dateStr}-${tipo}-${slugify(result.titulo)}`;
+        if (catalog.entries.some((e) => e.id === id)) {
+          id = `${id}-${Math.random().toString(36).slice(2, 6)}`;
+        }
         const fname = `${id}.md`;
         const citas = Array.isArray(result.citas) ? result.citas : [];
         const body = `# ${result.titulo}\n\n${result.subtitulo ? `*${result.subtitulo}*\n\n` : ''}*Guía ${tipo} — ${dateStr} — categorías: ${cats.join(', ')}*\n\n---\n\n${bloquesToMarkdown(result.bloques)}`;

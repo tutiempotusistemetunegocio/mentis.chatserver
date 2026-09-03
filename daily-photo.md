@@ -25,7 +25,7 @@ Al llamar `POST /internal/daily-photo`:
 1. Trae de Dropbox el catálogo de fotos ya descritas (`photo-catalog.json`) y el historial de elecciones recientes (`photo-history.json`) — si es la primera corrida, ninguno existe todavía y arranca de cero.
 2. Lista la carpeta de medios (plana, sin subcarpetas — mismo criterio que la carpeta de alimentación de libros).
 3. Para las fotos nuevas o cambiadas que todavía no tienen descripción (hasta un máximo de 3 por corrida, configurable, para no pasarse de memoria ni de costo en una sola llamada), las describe con la API de Claude (visión) y guarda la descripción.
-4. Busca el ángulo del guion de **hoy** (ya generado por `daily-script.js`, en `content-history.json`). Si no hay guion de hoy, no elige nada — responde `chosen: null` con el motivo.
+4. Busca el ángulo del guion de **hoy** (ya generado por `daily-script.js`, en `content-history.json`), y del tipo `reel` de verdad — no un carrusel (`daily-script.js` guarda `tipo:'reel'` para ambos formatos, la diferencia real está en el campo `formato`; bug real corregido en auditoría del 3/9/2026, ya arreglado también en `daily-media.js`: antes esto gastaba una elección de foto real en días de carrusel, aunque ese video nunca se llega a pedir, restándole variedad a la rotación de los 15 días sin ningún beneficio a cambio). Si no hay guion de tipo reel de hoy, no elige nada — responde `chosen: null` con el motivo.
 5. Entre las fotos ya descritas y no usadas en los últimos 15 días, le pide a Mentis que elija la que mejor conecta con el ángulo de hoy.
 6. Guarda la elección en el historial y lo sube a Dropbox.
 

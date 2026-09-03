@@ -257,12 +257,24 @@ async function runDailyPhoto() {
     // sin guion todavía
   }
   const dateStr = new Date().toISOString().slice(0, 10);
-  const todayEntry = (contentHistory.entries || []).find((e) => e.date === dateStr && e.tipo === 'reel');
+  // BUG REAL encontrado en auditoría (3/9/2026): daily-script.js guarda
+  // tipo:'reel' para TODAS las entradas de guion corto (reel Y carrusel — la
+  // diferencia real está en el campo `formato`, no en `tipo`; ver el mismo
+  // bug ya corregido en daily-media.js). Este chequeo solo miraba `tipo`, así
+  // que en un día de carrusel esto igual creía que había "reel" de hoy y
+  // gastaba una elección de foto real — foto que después nunca se usa
+  // (daily-media.js sí filtra bien por formato, así que ese video nunca se
+  // pide) pero que sí queda marcada como "usada recientemente" durante 15
+  // días, restándole variedad a la rotación sin ningún beneficio a cambio.
+  // `formato || 'reel'` es a propósito: entradas viejas del historial, de
+  // antes de que existiera el campo `formato`, se tratan como reel (lo que
+  // siempre fueron).
+  const todayEntry = (contentHistory.entries || []).find((e) => e.date === dateStr && e.tipo === 'reel' && (e.formato || 'reel') === 'reel');
 
   if (!todayEntry) {
     return {
       ok: true, chosen: null, date: dateStr, newlyCataloged, videoSkipped,
-      reason: 'Hoy no hay guion de tipo "reel" en el historial (fin de semana, carrusel, o daily-script.js todavía no corrió) — no hay ángulo con qué elegir.',
+      reason: 'Hoy no hay guion de tipo "reel" (formato reel, no carrusel) en el historial (fin de semana, carrusel, o daily-script.js todavía no corrió) — no hay ángulo con qué elegir.',
     };
   }
 

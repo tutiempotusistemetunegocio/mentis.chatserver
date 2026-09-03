@@ -451,10 +451,44 @@ async function runDailyIngest() {
 
   // 3. Subir todo lo que haya cambiado — conocimiento, manifiesto y
   //    oportunidades — de vuelta a Dropbox.
+  //
+  // BUG REAL encontrado en auditoría (3/9/2026): antes, esto guardaba el
+  // manifiesto (marcando estos archivos como "ya procesados") SIN chequear
+  // si pushToDropbox() realmente había logrado subir el conocimiento nuevo —
+  // esa función fallaba en silencio (ver el comentario grande en
+  // push-dropbox.js). Si la subida fallaba y el disco de Render no
+  // sobrevivía hasta la próxima corrida, lo aprendido hoy se perdía para
+  // siempre, porque el manifiesto ya decía "esto no hace falta reprocesarlo".
+  // Ahora el manifiesto (local y en Dropbox) solo se guarda si el
+  // conocimiento realmente llegó a Dropbox — si algo falla, esta corrida
+  // termina en error a propósito y los mismos archivos se reintentan
+  // (reclasificar + resubir) en la próxima corrida en vez de darse por
+  // perdidos en silencio.
   if (processedNow.length > 0) {
-    saveManifest(manifest);
-    await pushToDropbox();
-    await dropboxUpload(dropboxToken, `${KNOWLEDGE_FOLDER}/processed-files.json`, fs.readFileSync(MANIFEST_PATH));
+    const pushResult = await pushToDropbox();
+    if (!pushResult.ok) {
+      return {
+        ok: false,
+        error: `El conocimiento nuevo se generó pero no se pudo subir completo a Dropbox (${(pushResult.failed || []).map((f) => f.name).join(', ') || pushResult.error || 'error desconocido'}) — a propósito NO se guardó el manifiesto, para que la próxima corrida reintente estos mismos archivos en vez de darlos por procesados sin que el conocimiento haya llegado a la fuente de verdad.`,
+        processed: processedNow,
+        failed,
+        categoriesUpdated: Array.from(categoriesUpdated),
+        strategyReview,
+      };
+    }
+    try {
+      saveManifest(manifest);
+      await dropboxUpload(dropboxToken, `${KNOWLEDGE_FOLDER}/processed-files.json`, fs.readFileSync(MANIFEST_PATH));
+    } catch (err) {
+      return {
+        ok: false,
+        error: `El conocimiento nuevo sí se subió bien a Dropbox, pero no se pudo actualizar el manifiesto (${err.message}) — la próxima corrida puede reprocesar estos mismos archivos (no duplica conocimiento, la deduplicación ya existente lo evita, solo repite el análisis) hasta que el manifiesto se actualice bien.`,
+        processed: processedNow,
+        failed,
+        categoriesUpdated: Array.from(categoriesUpdated),
+        strategyReview,
+      };
+    }
   }
   if (opportunitySaved) {
     await dropboxUpload(dropboxToken, `${KNOWLEDGE_FOLDER}/strategy-opportunities.json`, fs.readFileSync(OPPORTUNITIES_PATH));
