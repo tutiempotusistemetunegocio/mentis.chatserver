@@ -229,10 +229,18 @@ async function runDailyMedia(webhookBaseUrl) {
   }
   const history = loadHistory();
   const dateStr = todayUTC();
-  const todayEntry = history.entries.find((e) => e.date === dateStr && e.tipo === 'reel');
+  // BUG REAL encontrado el 3/9/2026: daily-script.js guarda tipo:'reel' para
+  // TODAS las entradas de guion corto (tanto reel como carrusel — la
+  // diferencia real está en el campo `formato`, no en `tipo`). Este chequeo
+  // solo miraba `tipo`, así que un día de carrusel también entraba acá y
+  // terminaba pidiéndole un video a Higgsfield — justo lo que el comentario
+  // de arriba decía que NO tenía que pasar. `formato || 'reel'` es a
+  // propósito: entradas viejas del historial, de antes de que existiera el
+  // campo `formato`, se tratan como reel (que es lo que siempre fueron).
+  const todayEntry = history.entries.find((e) => e.date === dateStr && e.tipo === 'reel' && (e.formato || 'reel') === 'reel');
 
   if (!todayEntry) {
-    return { ok: true, submitted: false, date: dateStr, reason: 'Hoy no hay guion de tipo "reel" en el historial (fin de semana, carrusel, o daily-script.js todavía no corrió) — no hay ángulo para convertir en clip.' };
+    return { ok: true, submitted: false, date: dateStr, reason: 'Hoy no hay guion de tipo "reel" (formato reel, no carrusel) en el historial (fin de semana, carrusel, o daily-script.js todavía no corrió) — no hay ángulo para convertir en clip.' };
   }
 
   const prompt = buildVisualPrompt(todayEntry);

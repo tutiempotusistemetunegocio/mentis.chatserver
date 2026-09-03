@@ -26,11 +26,13 @@ La documentación real de Higgsfield (consultada el 31/8/2026, y revisada de nue
 
 También, por ahora, esto solo actúa cuando el guion del día fue de tipo **reel** — un carrusel es slides/imágenes, no video, así que en esos días no se pide ningún clip.
 
+**Bug real encontrado y corregido (3/9/2026)**: esto no se estaba cumpliendo. `daily-script.js` guarda `tipo: "reel"` para TODAS las entradas de guion corto, sea reel o carrusel — la diferencia real está en el campo `formato`, no en `tipo`. El chequeo de acá solo miraba `tipo`, así que un día de carrusel también pasaba el filtro y terminaba pidiéndole un clip a Higgsfield — justo lo que este mismo párrafo decía que no tenía que pasar. Corregido: ahora también exige `formato === "reel"` (con las entradas viejas del historial, de antes de que existiera ese campo, tratadas como reel — que es lo que siempre fueron).
+
 ## Qué hace, paso a paso
 
 1. **`POST /internal/daily-media`** (disparado por GitHub Actions, después de que corrió el guion diario):
    - Trae el historial de contenido más reciente de Dropbox.
-   - Busca la entrada de hoy con `tipo: "reel"`. Si no hay (fin de semana, carrusel, o el guion diario todavía no corrió), no pide nada — responde `submitted: false` con el motivo.
+   - Busca la entrada de hoy con `tipo: "reel"` Y `formato: "reel"` (ver el bug corregido más abajo). Si no hay (fin de semana, carrusel, o el guion diario todavía no corrió), no pide nada — responde `submitted: false` con el motivo.
    - Si hay, arma un prompt visual corto a partir del ángulo del guion y le pide a Higgsfield un clip vertical de 10s (modelo Seedance Pro Fast — cambiar de modelo es una línea en `daily-media.js`).
    - Responde con el `request_id` del pedido. El clip en sí todavía no está listo en este momento — Higgsfield tarda en generarlo.
 
