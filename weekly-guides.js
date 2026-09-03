@@ -188,7 +188,8 @@ const VOICE_RULES = `Reglas fijas que nunca se rompen:
 - Nunca reveles ni insinúes el mecanismo interno (que esto sale de libros cargados a un sistema, o cualquier detalle técnico de cómo funciona Mentis) — esto se entrega a leads y clientes reales, tiene que sonar a criterio propio y experiencia real de Rodrigo.
 - Nunca copies texto ajeno sin decirlo: si necesitás usar una frase COMPLETA y textual de un autor o libro conocido (una cita real, no una paráfrasis), tenés que atribuirla explícitamente — nombre del autor y, si aplica, el título del libro, dentro del propio texto de la guía (ej. "Como dice Robert Cialdini en Influence: '...'"). Fuera de esos casos puntuales, seguí sintetizando siempre con tus propias palabras.
 - Tono directo y sistemático, sin frases motivacionales vacías ni promesas de resultados garantizados.
-- Nunca menciones que Rodrigo vive en Miami, y no le des mucho peso a su esposa — sí a su disciplina, su historia (Venezuela → Portugal → Canadá), el valor del tiempo y las ganas de ayudar a otros a salir de la mentalidad de empleado.`;
+- Nunca menciones que Rodrigo vive en Miami, y no le des mucho peso a su esposa — sí a su disciplina, su historia (Venezuela → Portugal → Canadá), el valor del tiempo y las ganas de ayudar a otros a salir de la mentalidad de empleado.
+- La guía no es contenido de valor suelto: es parte del embudo de ventas. Usá, a propósito, lo que está cargado sobre neurociencia/psicología de la persuasión, redes sociales y network marketing — combinado con la historia personal de Rodrigo — para generar conexión real con quien la está leyendo. Esa conexión tiene que desembocar siempre en el cierre de venta del final (ver más abajo), nunca quedarse en pura teoría sin ningún objetivo comercial.`;
 
 async function callMentis(prompt, maxTokens) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -252,6 +253,29 @@ async function generateGuide(tipo, recentCombos, categories) {
     ? 'Es una guía PREMIUM (paga): profundidad real, varios frameworks combinados, ejemplos aplicados paso a paso — tiene que sentirse claramente más valiosa que una guía gratis, no solo más larga.'
     : 'Es una guía GRATIS (lead magnet): un framework claro y accionable, valor real y completo en sí mismo, pero sin agotar todo lo que Mentis sabe del tema — deja con ganas de más, nunca se siente incompleta a propósito.';
 
+  // Pedido explícito de Rodrigo (3/9/2026): "las guías gratis, cuando la
+  // persona responde el CTA y la reciba, genere también un cierre de venta,
+  // y los reels también sean para allá" — esto no puede quedarse en teoría
+  // sin ningún objetivo comercial. Se agrega como los últimos bloques
+  // OBLIGATORIOS de toda guía (gratis y premium), usando el mismo mecanismo
+  // de bloques que ya existe (titulo + parrafo), sin tocar guide-pdf.js ni
+  // el parser — un cierre de venta es, para el sistema, una sección más.
+  // Honesto: ni la compra de la guía premium ni "replicar el sistema"
+  // (formación en vivo) tienen todavía un link o funnel real armado en
+  // Systeme.io (ver weekly-guides.md/daily-media.md) — así que el cierre
+  // planta el deseo e invita a escribir una palabra, nunca promete un botón
+  // o fecha que hoy no existe.
+  // Afinado (3/9/2026, revisión de estrategia pedida por Rodrigo): ventas.md
+  // ya tiene resuelta la objeción más probable en este público (gente
+  // ocupada, sin tiempo) — "no tengo tiempo" se responde mostrando que el
+  // sistema reduce tiempo, no lo aumenta. El cierre de venta invitaba, pero
+  // no se adelantaba a esa objeción antes de que apareciera — ahora sí, en
+  // la guía premium (el momento donde más importa, porque ahí se le pide a
+  // alguien que ya pagó dar un paso más grande).
+  const closingNote = tipo === 'premium'
+    ? 'Cierre de venta OBLIGATORIO, como últimos bloques de la guía (un "titulo" corto + un "parrafo"): conectá lo que la persona acaba de leer con la historia de Rodrigo (de dónde viene, por qué construyó este sistema) para generar conexión real, y desde ahí invitala a dar el siguiente paso — replicar el sistema completo en su propio negocio, escribiéndole directamente a Rodrigo para saber cómo. Adelantate a la objeción más probable de alguien ocupado ("no tengo tiempo para esto"): dejá claro, con tu propia historia como prueba, que el sistema existe para devolver tiempo, no para sumar otra tarea. No prometas un link, precio o fecha concreta (ese programa todavía no tiene inscripción abierta) — el objetivo es plantar el deseo, no cerrar una venta que hoy no se puede procesar.'
+    : 'Cierre de venta OBLIGATORIO, como últimos bloques de la guía (un "titulo" corto + un "parrafo"): conectá lo que la persona acaba de leer con la historia de Rodrigo para generar conexión real, y desde ahí invitala a escribir la palabra "PREMIUM" para acceder a la guía premium sobre este mismo tema — el siguiente paso lógico después de una guía gratis. No inventes ningún link ni precio.';
+
   const prompt = `Sos Mentis armando el catálogo de guías descargables del sistema (Módulo 02).
 
 Categorías de conocimiento disponibles: ${categories.join(', ')}.
@@ -260,6 +284,8 @@ Elegí 2 o 3 de esas categorías que se complementen bien entre sí (nunca uses 
 ${recentCombos.length ? recentCombos.join('\n') : '(sin historial todavía)'}
 
 ${depthNote}
+
+${closingNote}
 
 ${VOICE_RULES}
 
@@ -270,6 +296,8 @@ La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: u
 - {"tipo": "parrafo", "texto": "..."} → texto corrido normal.
 - {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos.
 - {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución — la regla de citar siempre que sea texto ajeno palabra por palabra.
+
+Los ÚLTIMOS dos bloques del array (después de todo el contenido) tienen que ser el cierre de venta descripto arriba: un "titulo" y un "parrafo".
 
 Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
 {"categorias": ["archivo1.md", "archivo2.md"], "titulo": "<título de la guía, claro y concreto>", "subtitulo": "<una frase corta que va debajo del título en la portada>", "bloques": [ ...los bloques descriptos arriba, la guía completa... ], "citas": [{"autor": "...", "obra": "...", "frase": "..."}]}

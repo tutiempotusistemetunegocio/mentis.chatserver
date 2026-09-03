@@ -115,6 +115,46 @@ function weekdayIndex(dateStr) {
   return d - 1;
 }
 
+const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+
+function stripAccents(s) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Pedido explícito de Rodrigo (3/9/2026), a partir de una mejora que el
+// propio Mentis señaló al revisar su estrategia: reglas.md YA tiene una
+// tabla de rotación de ángulos por día ("Ángulos en prueba esta semana" —
+// dolor+espejo, mito, detrás de cámaras, valor gratis, oferta directa, tu
+// por qué, antes/después), pensada justamente para no repetir siempre el
+// mismo tipo de gancho (redes-sociales.md: "nunca apostar todo a un solo
+// ángulo"). Pero antes esa tabla solo viajaba como texto suelto dentro de
+// todo el conocimiento cargado — nada obligaba a Mentis a seguirla de
+// verdad, así que en la práctica podía terminar repitiendo el mismo tipo de
+// ángulo varios días seguidos sin que nadie lo notara. Esta función la
+// PARSEA en vivo desde el propio reglas.md (en vez de copiar la tabla acá
+// con un valor fijo) para que, el día que el Módulo 07 la reescriba con
+// datos reales de Metricool, este código la siga solo, sin ningún cambio.
+// Si el parseo falla por lo que sea (formato cambiado, archivo movido),
+// devuelve null y el guion se sigue generando igual, solo sin ese empujón.
+function todaysAngleType(dateStr) {
+  try {
+    const p = path.join(KNOWLEDGE_DIR, 'reglas.md');
+    if (!fs.existsSync(p)) return null;
+    const content = fs.readFileSync(p, 'utf-8');
+    const section = content.split(/^## /m).find((s) => s.startsWith('Ángulos en prueba'));
+    if (!section) return null;
+    const dayIdx = new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0=domingo
+    const dayName = DAY_NAMES[(dayIdx + 6) % 7]; // reindexa a 0=lunes...6=domingo
+    const needle = `${stripAccents(dayName.toLowerCase())}:`;
+    const line = section.split('\n').find((l) => stripAccents(l.toLowerCase()).includes(needle));
+    if (!line) return null;
+    const tipo = line.split(':').slice(1).join(':').trim();
+    return tipo || null;
+  } catch {
+    return null;
+  }
+}
+
 function daysSinceEpoch(dateStr) {
   const epoch = Date.UTC(2026, 0, 1); // ancla fija y arbitraria, solo para tener un ritmo de 3 días estable
   const d = Date.UTC(...dateStr.split('-').map((n, i) => (i === 1 ? Number(n) - 1 : Number(n))));
@@ -140,17 +180,24 @@ async function callMentis(prompt, maxTokens) {
 const VOICE_RULES = `Reglas fijas que nunca se rompen:
 - Nunca reveles ni insinúes el mecanismo interno (que esto sale de libros cargados a un sistema, o cualquier detalle técnico de cómo funciona Mentis) — esto se publica en redes, tiene que sonar a criterio propio y experiencia real, con gancho y sin explicar el truco.
 - Tono directo y sistemático, sin frases motivacionales vacías ni promesas de resultados garantizados.
-- Nunca menciones que Rodrigo vive en Miami, y no le des mucho peso a su esposa — sí a su disciplina, su historia (Venezuela → Portugal → Canadá), el valor del tiempo y las ganas de ayudar a otros a salir de la mentalidad de empleado.`;
+- Nunca menciones que Rodrigo vive en Miami, y no le des mucho peso a su esposa — sí a su disciplina, su historia (Venezuela → Portugal → Canadá), el valor del tiempo y las ganas de ayudar a otros a salir de la mentalidad de empleado.
+- Esto no es contenido por contenido: el objetivo final es vender (a Rodrigo mismo — sus guías, su sistema). Cada pieza tiene que usar, a propósito, lo que está cargado sobre neurociencia/psicología de la persuasión, redes sociales y network marketing — combinado con la historia personal de Rodrigo — para generar conexión real con quien lo lee/mira. La conexión no es el fin, es el medio: siempre tiene que llevar a una acción concreta de venta al cierre (ver CTA), nunca quedarse en "contenido de valor" suelto sin ningún objetivo comercial detrás.`;
 
 async function generateReelScript(dateStr, wIdx, history) {
   const recent = history.entries.slice(-HISTORY_LOOKBACK).filter((e) => e.tipo === 'reel');
   const recentAngles = recent.map((e) => `${e.date}: ${e.angulo}`).join('\n') || '(sin historial todavía)';
+  const angleType = todaysAngleType(dateStr);
+  const angleTypeNote = angleType
+    ? `Según la rotación de ángulos en prueba esta semana (reglas.md), hoy toca un ángulo del TIPO "${angleType}" — desarrollá el gancho concreto de hoy dentro de ese tipo (no elijas un tipo distinto), aunque el gancho específico tiene que ser nuevo, distinto a los últimos usados.`
+    : '';
   const prompt = `Sos Mentis escribiendo el guion de contenido de hoy (${dateStr}) para Rodrigo, dueño de este sistema.
 
 ${VOICE_RULES}
 
 Elegí un formato (reel corto de 30-60s, o carrusel de 5-8 slides) y un ángulo/gancho concreto para hoy, distinto a los últimos usados. Angulos usados recientemente (no repitas el mismo gancho central):
 ${recentAngles}
+
+${angleTypeNote}
 
 Basate en todo el conocimiento cargado más abajo — combiná lo que haga falta (marketing, mentalidad, ventas, redes, lo que aplique), como lo haría alguien que domina todas esas áreas a la vez.
 
@@ -162,8 +209,10 @@ Además, para cuando el clip se genere a mano en la interfaz completa de Higgsfi
 - "captionText": el texto EXACTO que tiene que aparecer en pantalla como caption/overlay durante el clip — corto (una frase, pensado para leerse en los 12s del clip), en español, el gancho central de hoy condensado a su forma más directa y llamativa (no el guion completo, no la CTA — solo el gancho, como titular).
 - "musicStyle": el tipo de música de fondo que mejor acompaña el tono de hoy — corto, en inglés, como se describiría a una herramienta de generación (ej. "tense minimal piano, slow build" o "upbeat motivational synth, driving rhythm"), coherente con la energía del ángulo de hoy.
 
+El CTA del final tiene que ser una venta real, no un cierre genérico: usando la conexión que generaste en el guion (historia + el ángulo de hoy), invitá explícitamente a comentar la palabra "MENTIS" para recibir una guía gratis — esa palabra fija es la puerta de entrada al embudo completo (guía gratis → oferta premium), siempre la misma, nunca inventes otra distinta por día ni un link que no exista.
+
 Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
-{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "escenaVisual": "<en inglés, la escena única de hasta 12s descripta arriba>", "captionText": "<en español, el texto exacto del caption en pantalla>", "musicStyle": "<en inglés, el estilo de música de fondo>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<call to action del final, ej. invitar a comentar la palabra clave>"}
+{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "escenaVisual": "<en inglés, la escena única de hasta 12s descripta arriba>", "captionText": "<en español, el texto exacto del caption en pantalla>", "musicStyle": "<en inglés, el estilo de música de fondo>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<CTA de venta real, con la palabra clave a comentar>"}
 
 --- CONOCIMIENTO DE MENTIS ---
 ${fullKnowledgeSnapshot()}`;

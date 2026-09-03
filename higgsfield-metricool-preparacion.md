@@ -6,17 +6,19 @@ Este archivo documenta cómo se conectarían Higgsfield y Metricool al sistema, 
 
 ## Higgsfield — generar el video/imagen a partir del guion
 
-Tiene API real y documentada (`docs.higgsfield.ai`), con SDK oficial para Node (`@higgsfield/client`).
+**Confirmado el 31/8/2026 leyendo `docs.higgsfield.ai` directamente (no fuentes de terceros).**
 
-**Cómo se autentica:** un par de claves (Key ID + Key Secret), generadas en su panel ("Higgsfield Cloud"). Van como dos secretos nuevos en Render — no un solo token como los que ya usamos.
+**Cómo se autentica:** un header `Authorization: Key {KEY_ID}:{KEY_SECRET}` — dos secretos nuevos en Render, no uno solo. La doc es explícita: nunca se llama desde el navegador o una app — solo servidor a servidor, exactamente como ya hacemos.
 
-**Cómo funciona el flujo:** es asíncrono. Le mandás el prompt (derivado del guion del día), te devuelve un `request_id` al toque, y el video/imagen se genera en segundo plano (`queued` → `in_progress` → `completed`). Hay dos formas de enterarte cuándo terminó:
-- **Webhook** (recomendado): Higgsfield sí soporta mandar un aviso a una URL propia con secreto (`webhook: { url, secret }` al pedir el job) — a diferencia de Systeme.io, esto sí lleva secreto propio, no hay que inventar el truco de la URL. Es el mismo patrón que ya usamos para los webhooks de Systeme.io, pero más simple.
-- **Polling**: guardar el `request_id` y preguntar en la corrida del día siguiente si ya está listo. Más simple de programar pero más lento (el video puede tardar más de un día en aparecer).
+**Cómo funciona el flujo:** asíncrono. Se manda un POST a un endpoint de modelo específico (hay varios: Seedance/Bytedance, Veo, Kling — con distinta calidad/costo/duración máxima), devuelve un `request_id` al toque, y el resultado se genera en segundo plano (`queued` → `in_progress` → `completed`/`failed`/`nsfw`/`canceled`).
 
-**El resultado es una URL**, no un archivo que te manden directo — Higgsfield aloja el video/imagen y te da el link. Hay que decidir si se descarga y se sube a Dropbox (para tener respaldo propio) o se usa directo esa URL para el siguiente paso (Metricool también necesita una URL pública, así que podría alcanzar con la de Higgsfield sin pasar por Dropbox).
+**Ojo con la duración — esto es importante y cambia el diseño:** ningún modelo de video genera un clip de 60 segundos de una sola vez. Los máximos reales por pedido son cortos: Seedance hasta 12s, Kling hasta 10s, Veo hasta 8s. Un reel completo de 60s (como el que ya generamos con `daily-script.js`) **no sale de un solo pedido a Higgsfield** — haría falta pedir varios clips cortos y editarlos juntos, o (más simple al principio) usar Higgsfield solo para generar UN clip corto de portada/gancho y completar el resto con la carpeta de medios existente, tal como ya preveía el plano. Esto hay que decidirlo antes de programar el paso de armado final.
 
-**Costo:** tiene planes pagos, pero las fuentes no coinciden en los precios exactos y el uso de la API se cobra aparte en créditos, no incluido sin más en la suscripción. Esto hay que confirmarlo recién al crear la cuenta, mirando `higgsfield.ai/pricing` directo.
+**Webhook — con una salvedad de seguridad importante:** se pasa la URL propia como parámetro en la misma URL del pedido (`?hf_webhook=https://tu-servidor.com/...`), no como un campo separado con secreto como pensé antes de leer la doc real. **La documentación de Higgsfield no menciona ningún mecanismo para verificar que el aviso vino realmente de Higgsfield** (nada de firma ni secreto propio) — a diferencia de lo que asumí en la primera versión de este documento. Esto significa que hay que aplicar el mismo truco que ya usamos con Systeme.io: meter un secreto nuestro en la propia URL del webhook (`/webhook/higgsfield-listo/<secreto>`), para que nadie más pueda mandarnos avisos falsos.
+
+**El resultado es una URL**, no un archivo — Higgsfield aloja el video/imagen y lo mantiene disponible **mínimo 7 días**, así que conviene descargarlo y subirlo a Dropbox pronto después de que esté listo, no confiar en que el link dure para siempre.
+
+**Costo:** confirmado en la cuenta real de Rodrigo (creada el 31/8) — planes desde $19/mes (Starter, 270 créditos, sin acceso a los modelos más nuevos) hasta $115/mes (Ultra, 3.000 créditos). El plan Starter alcanzaría para ~15 videos cortos por mes — insuficiente si se genera un clip por cada guion de lunes a viernes (~20-22/mes); el plan Plus ($54/mes, 1.200 créditos) alcanzaría cómodo. Esto es una decisión de costo de Rodrigo, no una recomendación.
 
 ## Metricool — publicar el contenido y traer las métricas
 

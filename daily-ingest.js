@@ -22,6 +22,24 @@
 //  4. Aplica esos cambios a los archivos locales de /knowledge — nunca borra
 //     una línea existente; si algo quedó desactualizado, lo marca con
 //     "[desactualizado: ...]" en vez de eliminarlo (ver reglas.md).
+//  4.5. Agregado 3/9/2026, pedido explícito de Rodrigo ("cada vez que se
+//     carga nueva información, que ajuste la estrategia si hace falta"): si
+//     esta corrida sumó algún principio nuevo, se le pregunta a Mentis una
+//     vez más si eso cambia algo de la ESTRATEGIA central (reglas.md, cómo
+//     vende — no un tema puntual) y, si sí, agrega esa línea a la sección
+//     "Ajustes de estrategia" de reglas.md (nunca borra, mismo criterio que
+//     el resto del archivo). Ver reviewStrategy() más abajo.
+//  4.6. Agregado el mismo día, pedido explícito de Rodrigo ("buscar siempre
+//     nuevas oportunidades para vender, para monetizar"): en la misma
+//     llamada de 4.5, se le hace a Mentis una segunda pregunta, separada de
+//     la anterior — no si hay que ajustar CÓMO ya vende, sino si el
+//     documento sugiere algo NUEVO y concreto que Rodrigo podría vender. Si
+//     Mentis dice que sí, se agrega como una entrada nueva (nunca se
+//     sobreescribe ninguna) a strategy-opportunities.json, que después se
+//     sube a Dropbox junto con /knowledge — el panel personal (Módulo 08,
+//     ver panel.js) las muestra en su sección "Estrategia". Mismo criterio
+//     exigente: la mayoría de los documentos no generan ninguna oportunidad
+//     nueva, y eso es lo esperado.
 //  5. Sube /knowledge y el manifiesto actualizado de vuelta a Dropbox.
 
 const fs = require('fs');
@@ -32,6 +50,10 @@ const { pushToDropbox } = require('./push-dropbox');
 
 const KNOWLEDGE_DIR = path.join(__dirname, 'knowledge');
 const MANIFEST_PATH = path.join(__dirname, 'processed-files.json');
+// Oportunidades de monetización que Mentis va señalando (ver reviewStrategy
+// más abajo) — mismo patrón que video-history.json/photo-history.json: un
+// array que solo crece, nunca se sobreescribe una entrada vieja.
+const OPPORTUNITIES_PATH = path.join(__dirname, 'strategy-opportunities.json');
 const FEEDING_FOLDER = process.env.DROPBOX_FEEDING_FOLDER || ''; // '' = raíz del App folder
 const KNOWLEDGE_FOLDER = process.env.DROPBOX_KNOWLEDGE_FOLDER || '/mentis-reglas';
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
@@ -70,6 +92,21 @@ function loadManifest() {
   } catch {
     return { _comment: 'Manifiesto de la lectura diaria.', processed: {} };
   }
+}
+
+function loadOpportunities() {
+  if (!fs.existsSync(OPPORTUNITIES_PATH)) return { entries: [] };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(OPPORTUNITIES_PATH, 'utf-8'));
+    if (!Array.isArray(parsed.entries)) parsed.entries = [];
+    return parsed;
+  } catch {
+    return { entries: [] };
+  }
+}
+
+function saveOpportunities(data) {
+  fs.writeFileSync(OPPORTUNITIES_PATH, JSON.stringify(data, null, 2));
 }
 
 function saveManifest(manifest) {
@@ -222,6 +259,87 @@ function applyResult(result) {
   return Array.from(updated);
 }
 
+// Pedido explícito de Rodrigo (3/9/2026): "cada vez que se carga nueva
+// información, él se actualice también de forma a que ajuste la estrategia
+// — si tiene una sugestión de mejoría, considerala automáticamente". Hasta
+// acá, la lectura diaria solo sumaba conocimiento de TEMAS puntuales
+// (categorías) — nunca se preguntaba si lo aprendido cambia algo de CÓMO
+// Mentis vende (la estrategia central, guardada en reglas.md). Esto agrega
+// ese paso: después de sumar los principios nuevos de este run, se le
+// pregunta a Mentis una vez más si eso motiva un ajuste real de estrategia.
+// A propósito, solo corre cuando este run realmente aprendió algo nuevo
+// (learnedThisRun no vacío) — no tiene sentido ni cuesta gastar una llamada
+// extra a la API si no hubo ningún principio nuevo que evaluar.
+//
+// Ampliado (3/9/2026, mismo día, pedido explícito de Rodrigo: "buscar
+// siempre nuevas oportunidades para monetizar"): además del ajuste de
+// estrategia de venta (arriba), se le pregunta a Mentis por separado si el
+// documento de hoy sugiere una oportunidad NUEVA de monetización — no cómo
+// vender lo que ya existe (eso es el ajuste de arriba), sino algo distinto
+// que valga la pena ofrecer. Es la semilla de la sección "Estrategia" del
+// panel personal (Módulo 08), que el plano describe y hasta hoy no existía
+// con datos reales — ver panel.md. Mismo criterio exigente: la mayoría de
+// las corridas no debería encontrar nada.
+async function reviewStrategy(learnedThisRun) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const rulesPath = path.join(KNOWLEDGE_DIR, 'reglas.md');
+  const reglasActuales = fs.existsSync(rulesPath) ? fs.readFileSync(rulesPath, 'utf-8') : '';
+  const resumenAprendido = Object.entries(learnedThisRun)
+    .map(([file, lines]) => `${file}:\n${lines.map((l) => `  ${l}`).join('\n')}`)
+    .join('\n\n');
+
+  const prompt = `Sos Mentis. Hoy incorporaste conocimiento nuevo real (recién agregado a tus categorías, no antes):
+
+${resumenAprendido}
+
+Tu estrategia central es la que está en reglas.md, completa acá:
+--- REGLAS.MD ACTUAL ---
+${reglasActuales}
+
+Con este conocimiento nuevo, respondé dos preguntas distintas:
+
+1. ¿La estrategia central (CÓMO Mentis vende — el enfoque general, el tipo de cierre, la forma de conectar — no un tema puntual de una categoría) sigue siendo la correcta, o hay un ajuste real y accionable que valga la pena agregar? Sé exigente: la respuesta correcta la mayoría de las veces es que NO hace falta ningún cambio — un principio nuevo sobre un tema no siempre cambia la estrategia de venta en sí. Proponé un ajuste SOLO si de verdad se conecta con cómo se vende, nunca por proponer algo.
+
+2. Por separado: ¿este documento sugiere una oportunidad NUEVA y concreta de monetización — algo distinto que Rodrigo podría ofrecer o vender, no una mejora a cómo ya vende lo que tiene? Mismo criterio exigente: proponé algo SOLO si es una idea específica y accionable con este mercado (gente que quiere organizar su tiempo, vender por redes, salir de la mentalidad de empleado) — nunca una idea genérica que aplicaría a cualquier negocio.
+
+Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta (usá "ajuste": false y/o "oportunidad": false cuando no aplique — pueden ser independientes, uno puede ser true y el otro false):
+{"ajuste": false o true, "razon": "<si ajuste=true: qué principio nuevo lo motiva, 1 frase corta>", "lineaNueva": "<si ajuste=true: el ajuste en sí, corto y accionable, mismo estilo del resto de reglas.md>", "oportunidad": false o true, "oportunidadIdea": "<si oportunidad=true: la idea concreta, 1-2 frases>", "oportunidadRazon": "<si oportunidad=true: qué del documento la motiva, 1 frase corta>"}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: MODEL, max_tokens: 1000, messages: [{ role: 'user', content: prompt }] }),
+    signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error((data.error && data.error.message) || `HTTP ${res.status} revisando la estrategia`);
+  const raw = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('Mentis no devolvió JSON válido revisando la estrategia.');
+  return JSON.parse(jsonMatch[0]);
+}
+
+// Igual que applyResult() con las categorías: nunca borra una línea de
+// reglas.md — la primera vez reemplaza el placeholder de la sección
+// "Ajustes de estrategia" (ver knowledge/reglas.md), y de ahí en más agrega
+// al final del archivo (esa sección es siempre la última). Si algún día un
+// ajuste queda superado, se marca `[desactualizado: motivo]` a mano o desde
+// una corrida futura de este mismo mecanismo — no desde acá, que solo suma.
+function applyStrategyAdjustment(razon, lineaNueva) {
+  const p = path.join(KNOWLEDGE_DIR, 'reglas.md');
+  if (!fs.existsSync(p)) return;
+  let content = fs.readFileSync(p, 'utf-8');
+  const bullet = lineaNueva.trim().startsWith('-') ? lineaNueva.trim() : `- ${lineaNueva.trim()}`;
+  const entry = razon ? `${bullet} [motivo: ${razon}]` : bullet;
+  const placeholder = '(Todavía sin ajustes propios — vacío hasta el primer documento que motive uno.)';
+  if (content.includes(placeholder)) {
+    content = content.replace(placeholder, entry);
+  } else {
+    content = content.replace(/\n+$/, '') + '\n' + entry + '\n';
+  }
+  fs.writeFileSync(p, content);
+}
+
 async function runDailyIngest() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: false, error: 'Falta ANTHROPIC_API_KEY en las variables de entorno.' };
@@ -242,6 +360,12 @@ async function runDailyIngest() {
     // Todavía no existe en Dropbox (primera corrida) — seguimos con el local/default.
   }
   const manifest = loadManifest();
+  try {
+    const oppBuf = await dropboxDownload(dropboxToken, `${KNOWLEDGE_FOLDER}/strategy-opportunities.json`);
+    fs.writeFileSync(OPPORTUNITIES_PATH, oppBuf);
+  } catch {
+    // Todavía no existe en Dropbox (primera vez que esto corre) — seguimos con local/default.
+  }
 
   // 2. Listar la carpeta de alimentación (plana, sin subcarpetas) y ver qué es nuevo.
   const entries = await dropboxListFolder(dropboxToken, FEEDING_FOLDER);
@@ -256,6 +380,7 @@ async function runDailyIngest() {
   const processedNow = [];
   const failed = [];
   const categoriesUpdated = new Set();
+  const learnedThisRun = {}; // { "archivo.md": ["- principio nuevo", ...] } — ver reviewStrategy() más abajo
 
   for (const entry of candidates.slice(0, MAX_FILES_PER_RUN)) {
     try {
@@ -271,6 +396,11 @@ async function runDailyIngest() {
       const result = await classifyAndSynthesize(entry.name, text);
       const updatedFiles = applyResult(result);
       updatedFiles.forEach((f) => categoriesUpdated.add(f));
+      for (const [file, lines] of Object.entries(result.additions || {})) {
+        if (!Array.isArray(lines) || !lines.length) continue;
+        if (!learnedThisRun[file]) learnedThisRun[file] = [];
+        learnedThisRun[file].push(...lines);
+      }
       manifest.processed[entry.path_lower] = {
         name: entry.name, content_hash: entry.content_hash,
         processedAt: new Date().toISOString(), categories: updatedFiles,
@@ -281,11 +411,53 @@ async function runDailyIngest() {
     }
   }
 
-  // 3. Subir todo lo que haya cambiado — conocimiento y manifiesto — de vuelta a Dropbox.
+  // 2.5. Pedido explícito de Rodrigo (3/9/2026): con lo aprendido HOY, ¿hay
+  // que ajustar la estrategia central (reglas.md)? Solo se llama si de
+  // verdad se aprendió algo nuevo esta corrida — no tiene sentido gastar una
+  // llamada extra a la API sobre una corrida que no sumó ningún principio.
+  // Un fallo acá (JSON inválido, timeout) no tira abajo el resto de la
+  // corrida — el conocimiento de categorías ya procesado más arriba se
+  // guarda igual; solo se pierde el ajuste de estrategia de esta vez en
+  // particular.
+  let strategyReview = { ajuste: false, oportunidad: false };
+  let opportunitySaved = false;
+  if (Object.keys(learnedThisRun).length > 0) {
+    try {
+      strategyReview = await reviewStrategy(learnedThisRun);
+      if (strategyReview.ajuste && strategyReview.lineaNueva) {
+        applyStrategyAdjustment(strategyReview.razon, strategyReview.lineaNueva);
+      }
+      // Pedido explícito de Rodrigo (3/9/2026): "buscar siempre nuevas
+      // oportunidades para monetizar" — se guarda en su propio archivo (no
+      // en reglas.md, que es sobre CÓMO vender lo que ya existe) para que
+      // el panel personal (Módulo 08) las pueda listar como una sección de
+      // "Estrategia" real, en vez de quedar enterradas en un log de
+      // GitHub Actions que nadie vuelve a mirar.
+      if (strategyReview.oportunidad && strategyReview.oportunidadIdea) {
+        const opportunities = loadOpportunities();
+        opportunities.entries.push({
+          date: new Date().toISOString().slice(0, 10),
+          fuente: processedNow.join(', ') || '(desconocida)',
+          idea: strategyReview.oportunidadIdea,
+          razon: strategyReview.oportunidadRazon || null,
+        });
+        saveOpportunities(opportunities);
+        opportunitySaved = true;
+      }
+    } catch (err) {
+      strategyReview = { ajuste: false, oportunidad: false, error: `No se pudo revisar la estrategia: ${err.message}` };
+    }
+  }
+
+  // 3. Subir todo lo que haya cambiado — conocimiento, manifiesto y
+  //    oportunidades — de vuelta a Dropbox.
   if (processedNow.length > 0) {
     saveManifest(manifest);
     await pushToDropbox();
     await dropboxUpload(dropboxToken, `${KNOWLEDGE_FOLDER}/processed-files.json`, fs.readFileSync(MANIFEST_PATH));
+  }
+  if (opportunitySaved) {
+    await dropboxUpload(dropboxToken, `${KNOWLEDGE_FOLDER}/strategy-opportunities.json`, fs.readFileSync(OPPORTUNITIES_PATH));
   }
 
   return {
@@ -293,6 +465,7 @@ async function runDailyIngest() {
     processed: processedNow,
     failed,
     categoriesUpdated: Array.from(categoriesUpdated),
+    strategyReview,
     pendingAfterThisRun: Math.max(candidates.length - processedNow.length - failed.length, 0),
   };
 }

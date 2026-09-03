@@ -38,7 +38,7 @@ En Render, cargar (además de las que ya existen):
 - `PHOTO_SECRET` — un string largo y random, distinto a los demás secretos, para proteger la ruta que dispara la elección.
 - `PHOTO_MAX_NEW_PER_RUN` — opcional, cuántas fotos nuevas describir por corrida (por defecto 3).
 
-No hace falta ninguna clave nueva de Anthropic ni de Dropbox — reutiliza `ANTHROPIC_API_KEY` y `DROPBOX_ACCESS_TOKEN`, que ya están cargadas.
+No hace falta ninguna clave nueva de Anthropic ni de Dropbox — reutiliza `ANTHROPIC_API_KEY` y las credenciales de Dropbox, que ya están cargadas (ver README.md, sección "Conectar Dropbox (con renovación automática)").
 
 En GitHub (`Settings → Secrets and variables → Actions`): `MENTIS_PHOTO_URL` (la URL del servidor + `/internal/daily-photo`) y `MENTIS_PHOTO_SECRET` (el mismo valor que `PHOTO_SECRET` en Render).
 

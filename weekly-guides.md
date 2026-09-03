@@ -61,6 +61,18 @@ Decisión técnica, para que quede claro por qué: el PDF se arma con `pdfkit` (
 
 Si por lo que sea el PDF de una guía puntual falla al armarse o al subirse a Dropbox (por ejemplo, si `pdfkit` todavía no terminó de instalarse en un deploy), la guía en sí NUNCA se pierde: el `.md` ya quedó guardado antes de intentar el PDF, y solo esa guía puntual queda sin versión con diseño hasta que se regenere. El catálogo (`archivoPdf`) solo marca un PDF como disponible después de confirmar que la subida a Dropbox terminó bien.
 
+## Cierre de venta obligatorio (3/9/2026)
+
+Pedido explícito de Rodrigo: "las guías gratis, cuando la persona responde el CTA y la reciba, genere también un cierre de venta, y los reels también sean para allá" — hasta acá, tanto las guías como el contenido diario eran contenido de valor puro, sin ningún objetivo comercial explícito al final. Se corrigió en los dos módulos (ver también `daily-script.md`).
+
+En `weekly-guides.js`: se sumó una regla fija a `VOICE_RULES` (la guía es parte del embudo de ventas, no contenido suelto — tiene que usar a propósito lo cargado sobre neurociencia/persuasión combinado con la historia de Rodrigo para generar conexión real) y una instrucción obligatoria de que los ÚLTIMOS dos bloques de toda guía (gratis y premium) sean el cierre de venta — mismo mecanismo de "bloques" que ya existía (un `titulo` + un `parrafo`), sin tocar `guide-pdf.js` ni el parser. El destino del cierre cambia según el tipo:
+- **Gratis** → invita a escribir "PREMIUM" para acceder a la guía premium del mismo tema (el siguiente paso lógico).
+- **Premium** → invita a escribirle directamente a Rodrigo para replicar el sistema completo (la formación en vivo del plano).
+
+**Caveat honesto, el mismo de siempre en este proyecto**: ni la compra de la guía premium ni "replicar el sistema" tienen hoy un link, precio o funnel real armado en Systeme.io — el funnel del producto premium todavía no existe ahí, y el de la formación en vivo tampoco. El cierre de venta, por ahora, es texto que planta el deseo e invita a escribir — no hay ningún botón ni automatización detrás todavía. Funciona igual como contenido (y queda listo para cuando esas piezas se conecten), pero no hay que esperar que alguien reciba una respuesta automática al escribir "PREMIUM" hasta que ManyChat (Módulo 04) esté armado.
+
+**Afinado (3/9/2026, revisión de estrategia)**: `ventas.md` ya tenía resuelta la objeción más probable de este público — gente ocupada, sin tiempo — con la respuesta "el sistema reduce tiempo, no lo aumenta". El cierre invitaba, pero no se adelantaba a esa objeción. Ahora el cierre de la guía premium (el momento donde más importa, porque ahí se le pide a alguien que ya pagó dar un paso más grande) la incluye a propósito, con la historia de Rodrigo como prueba.
+
 ## Regla nueva: citar autor si se usa una frase textual completa
 
 Pedido explícito de Rodrigo (2/9/2026), junto con este montaje: si en algún momento una guía necesita citar una frase COMPLETA y textual de un autor o libro conocido (no una paráfrasis), esa cita se tiene que atribuir explícitamente — nombre del autor y, si aplica, el título del libro, dentro del propio texto de la guía. Fuera de esos casos puntuales, sigue aplicando la regla de siempre: nunca copiar texto ajeno sin decirlo, sintetizando con las propias palabras de Mentis. Cada guía generada guarda si usó alguna cita (y cuál) en el índice del catálogo, para que quede auditable.

@@ -42,12 +42,29 @@ function drawPageBackground(doc) {
   doc.restore();
 }
 
+// BUG REAL encontrado con guías reales (3/9/2026): las guías premium (con
+// más páginas después de subirles el margen de tokens) aparecían con varias
+// páginas en blanco de más. Causa: este pie de página se dibuja a propósito
+// DENTRO del margen inferior de la página (MARGIN.bottom = 64, y este texto
+// va en height-40 — más abajo del límite de contenido normal). pdfkit, antes
+// de dibujar cualquier texto con `width` definido, chequea si entra dentro
+// del límite de contenido (altura de la página menos el margen inferior) —
+// como el pie de página cae fuera de ese límite a propósito, pdfkit asume
+// que "no entra" y agrega una página nueva en blanco ahí mismo antes de
+// dibujarlo, en vez de dibujarlo en la página que le pedimos con
+// `switchToPage`. Eso pasaba una vez por cada página de contenido (achica
+// el margen inferior a 0 temporalmente, solo mientras se dibuja el pie de
+// página, así pdfkit deja de pensar que se sale de la hoja — se restaura
+// enseguida después, para no afectar nada más del layout de esa página).
 function drawFooter(doc, pageLabel) {
+  const originalBottomMargin = doc.page.margins.bottom;
+  doc.page.margins.bottom = 0;
   doc.save();
   doc.font('Helvetica').fontSize(8.5).fillColor(COLOR_INK_DIM);
   doc.text('MENTIS', MARGIN.left, doc.page.height - 40, { width: 200, align: 'left', lineBreak: false });
   doc.text(pageLabel, 0, doc.page.height - 40, { width: doc.page.width - MARGIN.right, align: 'right', lineBreak: false });
   doc.restore();
+  doc.page.margins.bottom = originalBottomMargin;
 }
 
 function drawCover(doc, guide) {

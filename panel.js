@@ -35,6 +35,7 @@ const { getDropboxAccessToken } = require('./dropbox-auth');
 const GUIDES_FOLDER = process.env.DROPBOX_GUIDES_FOLDER || '/mentis-guias';
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 const MEDIA_FOLDER = process.env.DROPBOX_MEDIA_FOLDER || '/mentis-medios';
+const KNOWLEDGE_FOLDER = process.env.DROPBOX_KNOWLEDGE_FOLDER || '/mentis-reglas';
 const FETCH_TIMEOUT_MS = 20000;
 
 async function dropboxDownloadJSON(token, dropboxPath, fallback) {
@@ -87,13 +88,14 @@ function connectionStatus() {
 
 async function loadPanelData() {
   const token = await getDropboxAccessToken();
-  const [catalog, contentHistory, photoHistory, videoHistory] = await Promise.all([
+  const [catalog, contentHistory, photoHistory, videoHistory, opportunities] = await Promise.all([
     dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/content-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${MEDIA_FOLDER}/photo-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/video-history.json`, { entries: [] }),
+    dropboxDownloadJSON(token, `${KNOWLEDGE_FOLDER}/strategy-opportunities.json`, { entries: [] }),
   ]);
-  return { token, catalog, contentHistory, photoHistory, videoHistory };
+  return { token, catalog, contentHistory, photoHistory, videoHistory, opportunities };
 }
 
 function guideRow(g, secret) {
@@ -124,6 +126,7 @@ async function renderPanel(secret) {
   const recentContent = [...data.contentHistory.entries].slice(-12).reverse();
   const recentPhotos = [...data.photoHistory.entries].slice(-6).reverse();
   const recentVideoPrompts = [...data.videoHistory.entries].slice(-8).reverse();
+  const recentOpportunities = [...data.opportunities.entries].slice(-15).reverse();
 
   const guidesSection = `
     <section>
@@ -171,13 +174,22 @@ async function renderPanel(secret) {
       </tbody></table>
     </section>`;
 
+  const strategySection = `
+    <section>
+      <h2>Estrategia <span class="count">oportunidades de monetización que Mentis detectó solo</span></h2>
+      <p class="hint">Cada vez que la lectura diaria (daily-ingest.js) procesa un documento nuevo, Mentis se pregunta, por separado de clasificar el contenido en categorías, si eso abre una oportunidad NUEVA y concreta de vender algo distinto — no una mejora a cómo ya vende lo que tiene (eso ajusta directamente <code>reglas.md</code>, sin pasar por acá). El criterio es exigente a propósito, así que esto puede quedar vacío semanas seguidas — eso es lo esperado, no una falla.</p>
+      ${recentOpportunities.length ? `<table><tbody>
+        ${recentOpportunities.map((o) => `<tr><td class="dim">${esc((o.date || '').slice(0, 10))}</td><td>${esc(o.idea)}${o.razon ? `<br><span class="dim">${esc(o.razon)}</span>` : ''}</td><td class="dim">${esc(o.fuente || '')}</td></tr>`).join('')}
+      </tbody></table>` : '<p class="dim">Todavía ninguna — recién empieza a evaluarse a partir de la próxima lectura diaria que aprenda algo nuevo.</p>'}
+    </section>`;
+
   const pendingSection = `
     <section>
       <h2>Todavía no construido</h2>
-      <p class="dim">Estrategia (Mentis pensando como CEO) y el resumen semanal por WhatsApp/panel — necesitan sus propios módulos, que no existen todavía. Cuando se construyan, suman su sección acá, no reemplazan nada de lo de arriba.</p>
+      <p class="dim">De la sección "Estrategia" del plano original, hoy solo existe la parte de arriba (oportunidades de monetización, detectadas por conocimiento). Falta la parte basada en rendimiento real — qué ángulo/formato está funcionando mejor en redes, según datos de Metricool — y las mejoras a la herramienta misma; ninguna de las dos se puede construir todavía sin Metricool conectado. El resumen semanal por WhatsApp/panel tampoco existe todavía. Cuando se construyan, suman su parte acá, no reemplazan nada de lo de arriba.</p>
     </section>`;
 
-  return page('Panel personal', guidesSection + contentSection + statusSection + pendingSection);
+  return page('Panel personal', guidesSection + contentSection + strategySection + statusSection + pendingSection);
 }
 
 async function renderGuideContent(secret, id) {

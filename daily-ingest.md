@@ -18,12 +18,34 @@ Aclaración explícita de Rodrigo, ya cumplida: esto corre **en la nube**, nunca
 6. **Marca lo desactualizado, nunca lo borra.** Si el documento nuevo contradice algo que ya está escrito, el código no edita ni elimina esa línea — le agrega la etiqueta `[desactualizado: reemplazado por lectura más reciente]` delante, y la deja archivada en el mismo lugar. `server.js` ya sabe ignorar cualquier línea con esa etiqueta al armar sus respuestas (ver el prompt en `buildSystemPrompt`), pero la línea nunca desaparece del archivo. Esto es un límite duro en el código, no una preferencia de estilo: no hay ninguna ruta en `daily-ingest.js` que elimine una línea de conocimiento.
 7. **Actualiza el manifiesto y sube todo a Dropbox** — `knowledge/` completo (vía `push-dropbox.js`) y el manifiesto actualizado — para que la instancia servida del chat (este mismo proceso, de hecho) tenga el conocimiento fresco al toque, y para que sobreviva si Render reinicia el servicio.
 
+## Revisión de estrategia (agregado 3/9/2026)
+
+Pedido explícito de Rodrigo: "cada vez que se carga nueva información, [Mentis] se actualice también de forma a que ajuste la estrategia — si tiene una sugestión de mejoría, considerala automáticamente". Hasta acá, la lectura diaria solo aprendía TEMAS (los principios de cada categoría) — nunca se preguntaba si eso cambia algo de CÓMO Mentis vende. Esto viene de una revisión real que se le pidió a Mentis sobre la estrategia actual (guías + contenido diario con cierre de venta) — confirmó que el enfoque es correcto (con cita a principios concretos de `copywriting-persuasion.md`, `marketing.md`, `storytelling-oratoria.md`) y señaló tres mejoras puntuales, dos de las cuales ya se aplicaron directo (ver más abajo) y una tercera que se convirtió en este mecanismo permanente.
+
+Cómo funciona: si una corrida de la lectura diaria aprendió al menos un principio nuevo real (`learnedThisRun` no vacío), se hace una llamada extra a Mentis con ese resumen + el contenido completo de `knowledge/reglas.md` (la estrategia central), preguntando si hace falta un ajuste. La consigna es exigente a propósito ("la respuesta correcta la mayoría de las veces es que no hace falta ningún cambio") para que esto no se convierta en ruido — un principio nuevo sobre un tema puntual no siempre cambia la estrategia de venta en sí. Si Mentis decide que sí hace falta un ajuste, se agrega como una línea nueva en la sección "Ajustes de estrategia" de `reglas.md` (agregada junto con esto), nunca reemplazando ni borrando nada — mismo criterio de "nunca pierde lo aprendido" que ya regía para el resto del conocimiento. La sección arranca vacía; no hay nada que forzar ahí hasta que un documento real motive el primer ajuste.
+
+Distinto del bloque "Ángulos en prueba esta semana" (también en `reglas.md`): ese lo reescribe el Módulo 07 con datos de rendimiento real de Metricool — mide qué funciona. Este mecanismo nuevo es sobre conocimiento, no sobre métricas — analiza si lo que se está leyendo dice que el enfoque está bien, sin necesitar ningún dato de Metricool.
+
+**Las otras dos mejoras que señaló Mentis, ya aplicadas directo (sin esperar a este mecanismo, porque ya eran evidentes hoy):**
+- La tabla de rotación de ángulos de `reglas.md` estaba cargada como contexto pero nada obligaba a seguirla — `daily-script.js` ahora la parsea en vivo y le indica a Mentis qué tipo de ángulo le toca al día de la semana (ver `daily-script.md`).
+- Las guías premium no se adelantaban a la objeción más probable de su público (falta de tiempo) — el cierre de venta ahora la incluye a propósito, citando el principio ya cargado en `ventas.md` (ver `weekly-guides.md`).
+
+Una mejora que Mentis señaló y que **no se puede construir todavía**: usar prueba social real en los cierres. `psicologia-consumidor.md` confirma que reduce el riesgo percibido más que cualquier argumento — pero `reglas.md` prohíbe inventar resultados que no existen, y hoy no hay ningún alumno real de "replicar el sistema" ni comprador con resultado propio que citar. Queda pendiente hasta que exista el primer caso real.
+
+## Oportunidades de monetización (agregado 3/9/2026)
+
+Pedido explícito de Rodrigo, en el mismo momento que el mecanismo de arriba: "buscar siempre nuevas oportunidades para vender, para monetizar" — no solo ajustar cómo Mentis vende lo que ya existe (guías + sistema), sino detectar cuando el conocimiento nuevo sugiere algo distinto y concreto que Rodrigo podría ofrecer.
+
+Es la misma llamada a Mentis que la revisión de estrategia (mismo `learnedThisRun`, mismo `reglas.md` como contexto) pero con una segunda pregunta independiente — pueden responderse distinto: puede haber ajuste de estrategia sin oportunidad nueva, oportunidad nueva sin ajuste, ambas, o ninguna (lo más común). Mismo criterio exigente que el resto de este mecanismo: la mayoría de los documentos no generan ninguna oportunidad.
+
+Cuando Mentis sí identifica una, se guarda como una entrada nueva en `strategy-opportunities.json` (nunca se sobreescribe ni se borra ninguna entrada anterior — mismo principio de "nunca se pierde lo aprendido") y se sube a Dropbox junto con `/knowledge`. El panel personal (Módulo 08, `panel.js`) las muestra en su nueva sección "Estrategia" — ver `panel.md`. Esto es una lista de ideas para que Rodrigo evalúe y decida, no una acción automática: nada de esto arma ni publica una oferta nueva por sí solo.
+
 ## Cómo se dispara todos los días
 
 Un workflow de GitHub Actions (`.github/workflows/daily-ingest.yml`) llama a `POST /internal/daily-ingest` una vez por día (10:00 UTC por default, ajustable en el archivo — pensado para correr antes de la generación de contenido de las 7am hora de Rodrigo, Módulo 03, así el guion del día ya cuenta con lo que se subió el día anterior). También se puede disparar a mano en cualquier momento desde la pestaña "Actions" del repositorio en GitHub, sin esperar al horario — útil para probar.
 
 Configuración necesaria, una sola vez:
-- En Render: cargar `INGEST_SECRET` (cualquier string largo y random) además de `ANTHROPIC_API_KEY` y `DROPBOX_ACCESS_TOKEN`, que ya deberían estar.
+- En Render: cargar `INGEST_SECRET` (cualquier string largo y random) además de `ANTHROPIC_API_KEY` y las credenciales de Dropbox, que ya deberían estar (ver README.md, sección "Conectar Dropbox").
 - En GitHub (`Settings → Secrets and variables → Actions`): `MENTIS_INGEST_URL` (la URL del servidor + `/internal/daily-ingest`) y `MENTIS_INGEST_SECRET` (el mismo valor que `INGEST_SECRET` en Render).
 
 Sin `INGEST_SECRET` configurado en Render, la ruta queda completamente cerrada — ni siquiera intenta correr nada, devuelve un error explicando que falta configurarlo.
