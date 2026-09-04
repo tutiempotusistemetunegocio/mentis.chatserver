@@ -555,6 +555,31 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Herramienta de administración puntual, NO recurrente (Módulo 08 →
+  // admin-reset.js). Pedido explícito de Rodrigo (4/9/2026): "quiero que
+  // borres todas las guías y la vamos a hacer otra vez todo de nuevo con el
+  // nuevo mindset" — alcance confirmado con él: guías + contenido diario +
+  // el registro de fotos ya usadas (nunca las fotos en sí, sus descripciones,
+  // ni /knowledge). Es DESTRUCTIVO — por eso tiene su propio secreto
+  // (ADMIN_RESET_SECRET, nunca comparte uno de los otros módulos) y el
+  // workflow que la dispara pide escribir una confirmación a mano antes de
+  // llamarla (ver admin-reset.md).
+  if (req.method === 'POST' && req.url === '/internal/admin-reset-content') {
+    const expected = process.env.ADMIN_RESET_SECRET;
+    const got = req.headers['x-admin-reset-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'ADMIN_RESET_SECRET no está configurado — esta ruta queda desactivada hasta que se cargue (a propósito: es destructiva, nunca queda abierta por default).' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { resetGuidesAndContent } = require('./admin-reset');
+    resetGuidesAndContent()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error reseteando guías/contenido:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   // Regenerar el PDF de guías YA EXISTENTES (Módulo 02 → weekly-guides.js),
   // sin pedirle contenido nuevo a Mentis — pensado para el día que se
   // corrige un bug de armado del PDF (como el de las páginas en blanco del

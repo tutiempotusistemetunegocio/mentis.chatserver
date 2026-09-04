@@ -141,6 +141,9 @@ daily-script.md         → cómo funciona el guion diario, en detalle (compleme
 daily-media.md           → cómo funciona el video diario, en detalle (complementa a daily-media.js)
 daily-photo.md           → cómo funciona la carpeta de medios, en detalle — incluye los 4 criterios de selección (complementa a daily-photo.js)
 higgsfield-metricool-preparacion.md → lo que falta de Metricool y del armado final del Módulo 03, investigado pero no construido todavía
+admin-reset.js           → herramienta puntual (NO recurrente) que borra guías + contenido diario + registro de fotos usadas, para volver a generar todo de cero
+.github/workflows/admin-reset-content.yml → dispara admin-reset.js a mano (pide escribir "BORRAR" para confirmar) — nunca en cron
+admin-reset.md           → qué borra y qué no borra admin-reset.js, en detalle
 processed-files.json    → manifiesto de qué archivos de alimentación ya se procesaron
 content-history.json    → historial de guiones generados, para no repetir ángulo/tema (se crea solo)
 knowledge/               → un archivo por categoría + reglas.md (se actualiza solo con la lectura diaria)
