@@ -1,0 +1,99 @@
+name: Borrar guías y contenido (empezar de cero)
+
+# Herramienta puntual, NO recurrente (sin `schedule`) — pedida por Rodrigo
+# (4/9/2026): "quiero que borres todas las guías y la vamos a hacer otra vez
+# todo de nuevo con el nuevo mindset que tiene el sistema", alcance
+# confirmado con él: también el contenido diario ya generado (guiones y
+# clips) y el registro de qué fotos ya se usaron.
+#
+# ES DESTRUCTIVO Y NO SE PUEDE DESHACER. Por eso el input de abajo pide
+# escribir la palabra BORRAR a mano — sin eso exacto, este workflow se
+# cancela solo antes de tocar nada real en Dropbox.
+#
+# Qué borra: TODAS las guías (.md y .pdf, gratis y premium) y TODO el
+# contenido diario ya generado (guiones de reel/carrusel/podcast y los clips
+# .mp4 ya descargados) en Dropbox, más el registro de qué fotos ya se
+# usaron (para que la rotación de 15 días arranque de cero).
+#
+# Qué NO borra: las fotos en sí, sus descripciones ya generadas
+# (photo-catalog.json — cuestan una llamada a Claude visión por foto), ni
+# nada de /knowledge (reglas.md, categorías, ajustes de estrategia,
+# oportunidades de monetización).
+#
+# Después de correr esto no hace falta nada más a mano: la próxima corrida
+# de "Guías semanales de Mentis" y de la lectura/guion/foto diarios generan
+# todo de nuevo desde cero, ya con el mindset actual del sistema (cierre de
+# venta, rotación de ángulos, etc.) — podés disparar "Guías semanales de
+# Mentis" a mano varias veces seguidas para juntar rápido las primeras 10+10,
+# mismo truco que se usó la primera vez.
+#
+# Configuración necesaria, una sola vez:
+#  - En Render: cargar ADMIN_RESET_SECRET (un string largo y random, distinto
+#    a todos los demás secretos — a propósito no comparte ninguno).
+#  - En GitHub (Settings → Secrets and variables → Actions): MENTIS_ADMIN_URL
+#    (la URL del servidor + "/internal/admin-reset-content") y
+#    MENTIS_ADMIN_SECRET (el mismo valor que ADMIN_RESET_SECRET en Render).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Escribí BORRAR (en mayúsculas, tal cual) para confirmar — esto no se puede deshacer'
+        required: true
+
+jobs:
+  resetear:
+    runs-on: ubuntu-latest
+    env:
+      MENTIS_ADMIN_URL: ${{ secrets.MENTIS_ADMIN_URL }}
+      MENTIS_ADMIN_SECRET: ${{ secrets.MENTIS_ADMIN_SECRET }}
+      CONFIRMAR: ${{ github.event.inputs.confirmar }}
+    steps:
+      - name: Verificar confirmación
+        run: |
+          if [ "$CONFIRMAR" != "BORRAR" ]; then
+            echo "No escribiste BORRAR exactamente como se pedía — cancelado, no se tocó nada en Dropbox."
+            exit 1
+          fi
+          echo "Confirmado — se va a borrar contenido real en Dropbox."
+
+      - name: Borrar guías + contenido diario + registro de fotos usadas
+        run: |
+          # Mismo criterio que "Regenerar PDFs de guías": Render (free tier)
+          # se apaga solo tras 15 min sin uso y puede devolver su propia
+          # página de "despertando" con código 200 — no es una respuesta real
+          # del servidor. Se reintenta hasta que el cuerpo sea JSON de
+          # verdad (empieza con "{"), no alcanza con mirar el código HTTP.
+          attempt=1
+          max_attempts=6
+          body=""
+          code=""
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Intento $attempt de $max_attempts..."
+            response=$(curl -s -w "\n%{http_code}" --max-time 300 -X POST "$MENTIS_ADMIN_URL" \
+              -H "x-admin-reset-secret: $MENTIS_ADMIN_SECRET" \
+              -H "content-type: application/json" \
+              -d '{}')
+            curl_exit=$?
+            body=$(echo "$response" | head -n -1)
+            code=$(echo "$response" | tail -n 1)
+            first_char=$(echo "$body" | head -c 1)
+            if [ "$curl_exit" -eq 0 ] && [ "$first_char" = "{" ]; then
+              break
+            fi
+            echo "Todavía no es una respuesta real del servidor (probablemente Render sigue despertando) — esperando 20s y reintentando."
+            sleep 20
+            attempt=$((attempt + 1))
+          done
+
+          echo "HTTP $code"
+          echo "$body"
+
+          if [ "$(echo "$body" | head -c 1)" != "{" ]; then
+            echo "El reseteo falló — el servidor nunca respondió con JSON real después de $max_attempts intentos (revisá si Render está caído de verdad, no es el problema de siempre de 'estaba dormido')."
+            exit 1
+          fi
+          if [ "$code" -ge 400 ]; then
+            echo "El reseteo falló o terminó con errores parciales — revisá el mensaje de arriba (el campo \"failed\" lista qué no se pudo borrar, si algo)."
+            exit 1
+          fi
