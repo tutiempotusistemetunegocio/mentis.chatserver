@@ -555,6 +555,32 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Modelos de negocio para monetizar (Módulo 08 → business-models.js).
+  // Pedido explícito de Rodrigo (5/9/2026): "que el sistema, con el
+  // conocimiento que tiene, me dé sugerencias de negocios para generar
+  // ingresos" — aclarado por él mismo: modelos de negocio que él pueda
+  // ejecutar, no búsqueda de empresas reales en internet (no hay ninguna
+  // herramienta de búsqueda web acá, solo la API de Claude). Corre
+  // deliberadamente cada semana (no depende de que llegue un libro nuevo,
+  // a diferencia de las "oportunidades" de daily-ingest.js), disparada por
+  // GitHub Actions con su propio secreto — mismo patrón que el resto de las
+  // rutas /internal/*.
+  if (req.method === 'POST' && req.url === '/internal/business-models') {
+    const expected = process.env.BUSINESS_MODELS_SECRET;
+    const got = req.headers['x-business-models-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'BUSINESS_MODELS_SECRET no está configurado — esta ruta está desactivada hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runBusinessModels } = require('./business-models');
+    runBusinessModels()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error generando modelos de negocio:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   // Herramienta de administración puntual, NO recurrente (Módulo 08 →
   // admin-reset.js). Pedido explícito de Rodrigo (4/9/2026): "quiero que
   // borres todas las guías y la vamos a hacer otra vez todo de nuevo con el

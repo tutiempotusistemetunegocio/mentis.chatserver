@@ -88,14 +88,15 @@ function connectionStatus() {
 
 async function loadPanelData() {
   const token = await getDropboxAccessToken();
-  const [catalog, contentHistory, photoHistory, videoHistory, opportunities] = await Promise.all([
+  const [catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels] = await Promise.all([
     dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/content-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${MEDIA_FOLDER}/photo-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/video-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${KNOWLEDGE_FOLDER}/strategy-opportunities.json`, { entries: [] }),
+    dropboxDownloadJSON(token, `${KNOWLEDGE_FOLDER}/business-models.json`, { entries: [] }),
   ]);
-  return { token, catalog, contentHistory, photoHistory, videoHistory, opportunities };
+  return { token, catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels };
 }
 
 function guideRow(g, secret) {
@@ -127,6 +128,7 @@ async function renderPanel(secret) {
   const recentPhotos = [...data.photoHistory.entries].slice(-6).reverse();
   const recentVideoPrompts = [...data.videoHistory.entries].slice(-8).reverse();
   const recentOpportunities = [...data.opportunities.entries].slice(-15).reverse();
+  const recentBusinessModels = [...data.businessModels.entries].slice(-12).reverse();
 
   const guidesSection = `
     <section>
@@ -183,13 +185,27 @@ async function renderPanel(secret) {
       </tbody></table>` : '<p class="dim">Todavía ninguna — recién empieza a evaluarse a partir de la próxima lectura diaria que aprenda algo nuevo.</p>'}
     </section>`;
 
+  const businessModelsSection = `
+    <section>
+      <h2>Modelos de negocio <span class="count">para que Rodrigo genere ingreso propio</span></h2>
+      <p class="hint">Distinto de "Estrategia" de arriba (que es sobre qué venderle a la audiencia de Mentis): esto es sobre qué negocio puede montar y correr Rodrigo mismo, usando lo que ya sabe/tiene armado. Corre solo una vez por semana (business-models.js), leyendo toda la base de conocimiento — no espera a que llegue un libro nuevo. Para juntar varias ideas rápido, disparar el workflow "Modelos de negocio" a mano varias veces desde GitHub Actions.</p>
+      ${recentBusinessModels.length ? recentBusinessModels.map((m) => `
+        <div class="promptcard">
+          <div class="promptmeta"><span class="dim">${esc((m.date || '').slice(0, 10))}</span>${m.esfuerzo ? ` · esfuerzo: ${esc(m.esfuerzo)}` : ''}${m.inversionInicial ? ` · inversión inicial: ${esc(m.inversionInicial)}` : ''}</div>
+          <div class="promptangulo"><strong>${esc(m.titulo)}</strong></div>
+          <p class="dim mt">${esc(m.descripcion)}</p>
+          ${m.porQueEncaja ? `<p class="dim">¿Por qué encaja? ${esc(m.porQueEncaja)}</p>` : ''}
+          ${Array.isArray(m.primerosPasos) && m.primerosPasos.length ? `<details class="mt"><summary class="dim">Primeros pasos</summary><pre class="promptbox">${m.primerosPasos.map((p, i) => `${i + 1}. ${esc(p)}`).join('\n')}</pre></details>` : ''}
+        </div>`).join('') : '<p class="dim">Todavía ninguno — corré "Modelos de negocio" desde GitHub Actions para generar los primeros.</p>'}
+    </section>`;
+
   const pendingSection = `
     <section>
       <h2>Todavía no construido</h2>
-      <p class="dim">De la sección "Estrategia" del plano original, hoy solo existe la parte de arriba (oportunidades de monetización, detectadas por conocimiento). Falta la parte basada en rendimiento real — qué ángulo/formato está funcionando mejor en redes, según datos de Metricool — y las mejoras a la herramienta misma; ninguna de las dos se puede construir todavía sin Metricool conectado. El resumen semanal por WhatsApp/panel tampoco existe todavía. Cuando se construyan, suman su parte acá, no reemplazan nada de lo de arriba.</p>
+      <p class="dim">De la sección "Estrategia" del plano original, hoy existen las oportunidades de monetización de cara a la audiencia (detectadas por conocimiento) y, por separado, los modelos de negocio para Rodrigo mismo (arriba). Falta la parte basada en rendimiento real — qué ángulo/formato está funcionando mejor en redes, según datos de Metricool — y las mejoras a la herramienta misma; ninguna de las dos se puede construir todavía sin Metricool conectado. El resumen semanal por WhatsApp/panel tampoco existe todavía. Cuando se construyan, suman su parte acá, no reemplazan nada de lo de arriba.</p>
     </section>`;
 
-  return page('Panel personal', guidesSection + contentSection + strategySection + statusSection + pendingSection);
+  return page('Panel personal', guidesSection + contentSection + strategySection + businessModelsSection + statusSection + pendingSection);
 }
 
 async function renderGuideContent(secret, id) {
