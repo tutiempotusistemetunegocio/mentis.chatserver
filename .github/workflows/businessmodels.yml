@@ -1,0 +1,53 @@
+name: Modelos de negocio
+
+# Dispara la generación de modelos de negocio para monetizar (Módulo 08 →
+# business-models.js). Pedido explícito de Rodrigo (5/9/2026): "que el
+# sistema, con el conocimiento que tiene, me dé sugerencias de negocios para
+# generar ingresos" — modelos de negocio que él pueda ejecutar, no búsqueda
+# de empresas reales en internet.
+#
+# Corre una vez por semana, leyendo TODA la base de conocimiento (no espera
+# a que llegue un libro nuevo, a diferencia de las "oportunidades" de la
+# lectura diaria). Para juntar varias ideas rápido al principio: disparar
+# este workflow a mano varias veces seguidas desde la pestaña "Actions" de
+# GitHub (botón "Run workflow") — mismo truco que ya se usó con las guías y
+# la lectura diaria.
+#
+# Configuración necesaria, una sola vez:
+#  - En Render: cargar BUSINESS_MODELS_SECRET (un string largo y random,
+#    distinto a todos los demás secretos).
+#  - En GitHub (Settings → Secrets and variables → Actions):
+#     - MENTIS_BUSINESS_MODELS_URL: la URL del servidor +
+#       "/internal/business-models"
+#     - MENTIS_BUSINESS_MODELS_SECRET: el mismo valor que
+#       BUSINESS_MODELS_SECRET en Render
+
+on:
+  schedule:
+    # Miércoles 11:00 UTC — separado del lunes de "Guías semanales" para no
+    # solaparse, y después de que ya corrió la lectura diaria de esa mañana.
+    - cron: '0 11 * * 3'
+  workflow_dispatch: {} # permite dispararlo a mano, cuantas veces haga falta
+
+jobs:
+  modelos:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generar modelos de negocio nuevos
+        run: |
+          response=$(curl -s -w "\n%{http_code}" --max-time 300 -X POST "${{ secrets.MENTIS_BUSINESS_MODELS_URL }}" \
+            -H "x-business-models-secret: ${{ secrets.MENTIS_BUSINESS_MODELS_SECRET }}" \
+            -H "content-type: application/json")
+          curl_exit=$?
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "Falló — no hubo respuesta del servidor a tiempo (curl exit $curl_exit, probablemente un timeout)."
+            exit 1
+          fi
+          body=$(echo "$response" | head -n -1)
+          code=$(echo "$response" | tail -n 1)
+          echo "HTTP $code"
+          echo "$body"
+          if [ "$code" -ge 400 ]; then
+            echo "Falló generando modelos de negocio — revisá el mensaje de arriba."
+            exit 1
+          fi
