@@ -1,5 +1,6 @@
-// Módulo 03 → guion diario — genera el guion de reel/carrusel de cada día
-// (lunes a viernes, un ángulo distinto por día — ver "Detalle: cómo prueba
+// Módulo 03 → guion diario — genera el guion de reel/carrusel de TODOS los
+// días de la semana (un ángulo distinto por día, siguiendo la tabla de
+// "Ángulos en prueba esta semana" de reglas.md — ver "Detalle: cómo prueba
 // ángulos nuevos" en el plano) y el guion de podcast cada 3 días. Corre
 // DENTRO del mismo proceso que server.js (mismo servicio de Render, mismas
 // variables ya cargadas ahí) — igual que daily-ingest.js, ningún secreto
@@ -19,9 +20,9 @@
 //  1. Baja de Dropbox el historial de contenido (por si el servicio se
 //     reinició — mismo motivo que daily-ingest.js: el disco de Render no
 //     está garantizado entre reinicios).
-//  2. Decide qué generar hoy: reel/carrusel si es día hábil (lunes a
-//     viernes — ver nota más abajo), y guion de podcast si pasaron 3 días
-//     desde el último.
+//  2. Decide qué generar hoy: reel/carrusel todos los días (ver nota más
+//     abajo — antes solo de lunes a viernes) y guion de podcast si pasaron 3
+//     días desde el último.
 //  3. Le pide a Mentis (vía la API de Claude), con TODO el conocimiento
 //     cargado como contexto, que escriba el guion — evitando repetir el
 //     ángulo de los últimos días, y sin revelar nunca el mecanismo interno
@@ -29,10 +30,16 @@
 //  4. Guarda el guion como archivo fechado y lo sube a Dropbox, y actualiza
 //     el historial.
 //
-// Nota sobre "lunes a viernes": el plano solo especifica el reparto de
-// ángulos para 5 días (LUN-VIE) — no dice qué pasa el fin de semana. Por
-// default esto NO genera reel/carrusel sábado y domingo. Si Rodrigo quiere
-// contenido los 7 días, es un cambio de una línea (WEEKDAYS_ONLY).
+// Nota sobre "todos los días" (cambiado 5/9/2026, pedido explícito de
+// Rodrigo: "quiero que la generación de los prompts y de los reels sea toda
+// la semana y no solamente de lunes a viernes"): originalmente esto NO
+// generaba reel/carrusel sábado y domingo (WEEKDAYS_ONLY = true), porque el
+// plano original solo definía el reparto de ángulos para 5 días. reglas.md
+// ya tenía, desde antes, ángulos también para Sábado y Domingo en la tabla
+// "Ángulos en prueba esta semana" — así que activar los 7 días no necesitó
+// ningún ángulo nuevo, solo dejar de saltear el fin de semana. El cron de
+// GitHub Actions (daily-script.yml) ya corría los 7 días — era este código
+// el que descartaba sábado/domingo por su cuenta.
 
 const fs = require('fs');
 const path = require('path');
@@ -45,7 +52,9 @@ const HISTORY_PATH = path.join(__dirname, 'content-history.json');
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 const PODCAST_EVERY_N_DAYS = 3;
-const WEEKDAYS_ONLY = true; // ver nota arriba — fácil de cambiar a 7 días
+// Cambiado a false el 5/9/2026, pedido explícito de Rodrigo (ver nota
+// arriba) — reel/carrusel se genera los 7 días de la semana.
+const WEEKDAYS_ONLY = false;
 const HISTORY_LOOKBACK = 8; // cuántas entradas recientes se le muestran a Mentis para no repetir ángulo
 
 // Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,

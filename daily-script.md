@@ -4,13 +4,17 @@ Implementado igual que la lectura diaria (`daily-ingest.js`): la lógica vive en
 
 ## Una salvedad honesta: el "ángulo ganador" todavía no es adaptativo
 
-El plano describe que, con semanas de datos reales de Metricool, Mentis prioriza el ángulo que mejor funcionó y vuelve a probar ángulos nuevos cuando ese cae en rendimiento. Como Metricool no está conectado, `daily-script.js` **no tiene esa lógica todavía** — sería inventar datos de rendimiento que no existen. Lo que sí hace: le pasa a Mentis los ángulos usados en los últimos días (guardados en el historial) y le pide uno distinto, para mantener la variedad de la tabla del plano (lunes a viernes, un ángulo por día) sin repetirse. El día que Metricool esté conectado, este paso puede volverse realmente adaptativo — hoy es honesto que todavía no lo es.
+El plano describe que, con semanas de datos reales de Metricool, Mentis prioriza el ángulo que mejor funcionó y vuelve a probar ángulos nuevos cuando ese cae en rendimiento. Como Metricool no está conectado, `daily-script.js` **no tiene esa lógica todavía** — sería inventar datos de rendimiento que no existen. Lo que sí hace: le pasa a Mentis los ángulos usados en los últimos días (guardados en el historial) y le pide uno distinto, para mantener la variedad de la tabla del plano (un ángulo por día, los 7 días de la semana) sin repetirse. El día que Metricool esté conectado, este paso puede volverse realmente adaptativo — hoy es honesto que todavía no lo es.
+
+## Cambio (5/9/2026): reel/carrusel ahora se genera los 7 días, no solo lunes a viernes
+
+Pedido explícito de Rodrigo: "quiero que la generación de los prompts y de los reels sea toda la semana y no solamente de lunes a viernes". Originalmente `WEEKDAYS_ONLY = true` saltaba sábado y domingo, porque el plano original solo definía el reparto de ángulos para 5 días — pero `reglas.md` ya tenía, desde antes, ángulos propios para Sábado ("tu por qué") y Domingo ("antes/después") en la tabla "Ángulos en prueba esta semana", así que no hizo falta inventar ángulos nuevos: solo dejar de saltear esos dos días. El cron de `daily-script.yml` ya corría los 7 días de la semana — era este código el que descartaba el fin de semana por su cuenta. Con `WEEKDAYS_ONLY = false`, `daily-media.js` (video) y `daily-photo.js` (foto) también empiezan a generar los fines de semana automáticamente, sin ningún cambio propio — ambos ya dependían de "¿hay un guion de tipo reel hoy en el historial?", nunca tuvieron su propia restricción de día.
 
 ## Qué hace, paso a paso
 
 1. **Trae lo último de Dropbox primero** — sincroniza `knowledge/` (por si se cargó algo nuevo en la lectura diaria de esa misma mañana) y el historial de contenido (`content-history.json`) desde Dropbox, mismo motivo que `daily-ingest.js`: el disco de Render no está garantizado entre reinicios.
 2. **Decide qué generar hoy:**
-   - Reel o carrusel: de lunes a viernes (`WEEKDAYS_ONLY = true` en el código — el plano solo define el reparto de ángulos para esos 5 días; cambiar esto a 7 días es una línea si Rodrigo lo pide).
+   - Reel o carrusel: todos los días de la semana (ver "Cambio (5/9/2026)" arriba — antes solo lunes a viernes).
    - Podcast: cada 3 días, con un ritmo fijo desde una fecha ancla (no depende del día de la semana).
 3. **Le pide a Mentis un guion**, con una llamada a la API de Claude, usando TODO el conocimiento cargado (los 17+ archivos de `knowledge/`) como contexto, evitando repetir el ángulo/tema de los últimos días (historial), y con reglas de voz fijas: nunca revelar el mecanismo interno (esto se publica, así que la regla del secreto aplica con más fuerza que en el chat privado), tono directo, sin promesas de resultados, y el resto de las pautas de la página personal (no mencionar Miami, poco peso a la esposa, foco en disciplina/tiempo/historia).
 
