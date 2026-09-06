@@ -34,6 +34,22 @@ Cuando tengas muchos más libros y experiencias cargadas, este es el punto exact
 
 La respuesta del endpoint `/chat` incluye `usedBlocks` (bloques principales) y `looseBlocks` (ideas sueltas de otras áreas) — útil para verificar que la selección está funcionando bien mientras probás.
 
+## Dictado por voz y adjuntar archivos (6/9/2026)
+
+Pedido explícito de Rodrigo: "que Mentis Premium tenga la opción de escribir por voz y poder cargar ficheros". Son dos features separadas, con implementaciones muy distintas:
+
+**Dictado por voz**: es enteramente del lado del navegador (Web Speech API) — nunca toca `server.js` para nada. El botón 🎤 al lado del campo de texto dicta directo adentro del mismo input de siempre; el cliente sigue escribiendo o corrigiendo a mano si hace falta, y aprieta "Enviar" como siempre. Chrome, Edge y Safari lo soportan; Firefox no — en ese caso el botón queda deshabilitado con una explicación en el título, en vez de fallar en silencio al tocarlo.
+
+**Adjuntar archivos**: el cliente puede sumar una imagen, un PDF o un archivo de texto (`.txt`/`.md`/`.csv`/`.json`) a su pregunta, con el botón 📎. El archivo se lee en el navegador como base64 y viaja adentro del mismo `POST /chat` de siempre, en un campo nuevo (`archivo: {nombre, tipo, datosBase64}`). El servidor arma el bloque de contenido que corresponda antes de mandarlo a Claude:
+
+- **Imagen** (jpg/png/gif/webp): bloque `image` nativo — Mentis la "ve" directamente.
+- **PDF**: bloque `document` nativo — Mentis lee el texto (y las imágenes, si tiene) del PDF directamente, sin que nadie tenga que extraer el texto a mano.
+- **Texto plano**: se decodifica y se agrega como un bloque de texto más, separado con marcas claras ("--- Archivo adjunto: ... ---") antes de la pregunta del cliente.
+
+Límite de tamaño: `CHAT_FILE_MAX_MB` en `.env` (default 8MB) — protege la memoria de Render (free tier, 512MB) de un archivo enorme, y evita que un archivo de texto gigante dispare sin querer el costo/tamaño de una llamada a la API. El navegador avisa temprano si el archivo elegido ya se pasa de ese límite (antes de mandarlo), y el servidor lo vuelve a chequear igual del otro lado — nunca confía solo en el chequeo del cliente. Un tipo de archivo no admitido (por ejemplo un video o un ejecutable) responde con un error claro, nunca en silencio.
+
+Honesto sobre lo que falta probar: esto no se pudo correr contra una llamada real a la API de Claude desde el entorno donde se escribió (mismo caveat de siempre con código nuevo) — la sintaxis y la lógica de armado de los bloques están verificadas, pero la primera prueba real (subir una foto o un PDF de verdad y ver que Mentis responda bien sobre eso) queda pendiente de la primera vez que se use en Render.
+
 ## Acceso — dos sistemas separados
 
 Rodrigo pidió dos accesos que nunca se cruzan: uno para el cliente premium del chat (paga el acceso a Mentis, Módulo 04/08) y otro para el alumno de la formación en vivo que recibe su propia copia del panel personal (Módulo 02). Cada uno tiene su propio manifiesto (`access-premium.json` / `access-panel-alumnos.json`, ambos ignorados por git — nunca se suben), su propio webhook (`/webhook/systeme-premium` y `/webhook/systeme-panel`) y su propio secreto compartido con Systeme.io (`SYSTEME_PREMIUM_WEBHOOK_SECRET` / `SYSTEME_PANEL_WEBHOOK_SECRET` en `.env`). Con `REQUIRE_ACCESS_CHECK=false` (el default) el servidor no exige acceso, para poder seguir probando en local sin depender de Systeme.io — ponelo en `true` antes de mostrárselo a un cliente real.

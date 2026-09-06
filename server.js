@@ -30,6 +30,76 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 
+// --- Adjuntos en el chat premium (Módulo 04/08) -----------------------------
+// Pedido explícito de Rodrigo (6/9/2026): "que Mentis Premium tenga la
+// opción de escribir por voz y poder cargar ficheros". El dictado por voz
+// es enteramente del lado del navegador (Web Speech API, ver
+// public/index.html) — nunca toca este servidor, solo dicta texto adentro
+// del mismo campo de siempre. Los archivos sí pasan por acá: el cliente
+// manda el archivo codificado en base64 dentro del mismo POST /chat de
+// siempre (un campo más, "archivo"), y el servidor arma el bloque de
+// contenido que corresponda para mandárselo a Claude.
+//
+// CHAT_FILE_MAX_MB limita cuánto puede pesar un archivo (en MB, sobre el
+// tamaño real del archivo — el string base64 pesa más, se ajusta abajo)
+// para no arriesgar la memoria de Render (free tier, 512MB) con un
+// archivo enorme, y para no disparar sin querer el costo/tamaño de una
+// llamada a la API de Claude.
+const CHAT_FILE_MAX_MB = parseFloat(process.env.CHAT_FILE_MAX_MB || '8');
+// Un archivo en base64 pesa ~4/3 de su tamaño real — el límite se aplica
+// sobre el string base64 tal cual llega, así que se ajusta el techo hacia
+// arriba para que "8MB" siga significando "un archivo real de ~8MB", no
+// ~6MB.
+const CHAT_FILE_MAX_BASE64_CHARS = Math.ceil(CHAT_FILE_MAX_MB * 1024 * 1024 * 4 / 3);
+const CHAT_ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+const CHAT_ALLOWED_TEXT_TYPES = ['text/plain', 'text/markdown', 'text/csv', 'application/json'];
+const CHAT_ALLOWED_FILE_TYPES = [...CHAT_ALLOWED_IMAGE_TYPES, 'application/pdf', ...CHAT_ALLOWED_TEXT_TYPES];
+
+// Error propio para poder distinguir, en la ruta /chat, un problema del
+// ARCHIVO que mandó el cliente (responde 400, con un mensaje pensado para
+// mostrarse tal cual) de un error real llamando a la API de Claude
+// (responde 500, mensaje genérico) — sin esto, los dos casos tirarían el
+// mismo tipo de Error y no habría forma limpia de diferenciarlos en el catch.
+class ArchivoError extends Error {}
+
+// Arma el/los bloque(s) de contenido que hay que anteponer al texto del
+// usuario cuando adjunta un archivo — devuelve null si no hay archivo.
+// Imagen y PDF van como bloques nativos (Claude los "ve" directamente);
+// un archivo de texto se decodifica y se agrega como un bloque de texto
+// más, separado con marcas claras. Tira ArchivoError (nunca falla en
+// silencio) si el tipo no está permitido o el archivo pesa de más.
+function buildArchivoBlocks(archivo) {
+  if (!archivo || !archivo.datosBase64) return null;
+  const tipo = String(archivo.tipo || '').toLowerCase();
+  const nombre = String(archivo.nombre || 'archivo');
+  if (!CHAT_ALLOWED_FILE_TYPES.includes(tipo)) {
+    throw new ArchivoError(`Tipo de archivo no admitido (${tipo || 'desconocido'}). Se admiten imágenes (jpg/png/gif/webp), PDF, y texto plano (.txt/.md/.csv/.json).`);
+  }
+  if (archivo.datosBase64.length > CHAT_FILE_MAX_BASE64_CHARS) {
+    throw new ArchivoError(`El archivo "${nombre}" pesa más de lo permitido (máximo ${CHAT_FILE_MAX_MB}MB).`);
+  }
+  if (CHAT_ALLOWED_IMAGE_TYPES.includes(tipo)) {
+    return [{ type: 'image', source: { type: 'base64', media_type: tipo, data: archivo.datosBase64 } }];
+  }
+  if (tipo === 'application/pdf') {
+    return [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: archivo.datosBase64 } }];
+  }
+  // Texto plano — se decodifica y se agrega como bloque de texto, con
+  // marcas claras para que Mentis distinga el archivo adjunto de la
+  // pregunta del cliente. Se recorta si es enorme (no por memoria — ya
+  // está en RAM — sino para no disparar el costo/tamaño de la llamada por
+  // un archivo de texto gigante).
+  let texto;
+  try {
+    texto = Buffer.from(archivo.datosBase64, 'base64').toString('utf-8');
+  } catch {
+    throw new ArchivoError(`No se pudo leer el archivo "${nombre}" como texto.`);
+  }
+  const LIMITE_TEXTO = 100000;
+  if (texto.length > LIMITE_TEXTO) texto = `${texto.slice(0, LIMITE_TEXTO)}\n\n[...archivo recortado, era más largo...]`;
+  return [{ type: 'text', text: `--- Archivo adjunto: ${nombre} ---\n${texto}\n--- Fin del archivo ---` }];
+}
+
 // --- Selección de conocimiento relevante -----------------------------------
 // Palabras clave por bloque. Deliberadamente simple (no es búsqueda
 // vectorial todavía) para que sea fácil de leer y ajustar a mano. Cuando el
@@ -262,19 +332,32 @@ Nada de lo que aprendiste se pierde nunca — pero no todo sigue vigente. Si una
 ${knowledge}`;
 }
 
-async function callClaude(userMessage) {
+async function callClaude(userMessage, archivo) {
   const { knowledge, usedBlocks, looseBlocks } = pickRelevantKnowledge(userMessage);
   const systemPrompt = buildSystemPrompt(knowledge, looseBlocks);
 
+  // Puede tirar ArchivoError (tipo no admitido, archivo muy pesado) — se
+  // deja subir sin atrapar acá adentro: quien llama (la ruta /chat) la
+  // distingue de un error real de la API y responde 400 en vez de 500.
+  const archivoBlocks = archivo ? buildArchivoBlocks(archivo) : null;
+
   if (!process.env.ANTHROPIC_API_KEY) {
     const looseNote = looseBlocks.length > 0 ? `\nIdeas sueltas de otras áreas: ${looseBlocks.join(', ')}` : '';
+    const archivoNote = archivo ? `\n\n[modo demo: se recibió el archivo "${archivo.nombre}" (${archivo.tipo}), pero en modo demo no se procesa — hace falta ANTHROPIC_API_KEY para que Mentis lo lea de verdad]` : '';
     return {
-      reply: `[modo demo — falta ANTHROPIC_API_KEY en .env]\n\nTu pregunta llegó bien: "${userMessage}"\n\nBloques de conocimiento elegidos para responderla: ${usedBlocks.join(', ')}${looseNote}\n\nEn cuanto cargues una clave real de la API de Claude en el archivo .env, esta misma pregunta va a recibir una respuesta real generada por Mentis, combinando esos bloques en una sola respuesta coherente si son más de uno.`,
+      reply: `[modo demo — falta ANTHROPIC_API_KEY en .env]\n\nTu pregunta llegó bien: "${userMessage}"\n\nBloques de conocimiento elegidos para responderla: ${usedBlocks.join(', ')}${looseNote}${archivoNote}\n\nEn cuanto cargues una clave real de la API de Claude en el archivo .env, esta misma pregunta va a recibir una respuesta real generada por Mentis, combinando esos bloques en una sola respuesta coherente si son más de uno.`,
       mode: 'demo',
       usedBlocks,
       looseBlocks,
     };
   }
+
+  // Sin archivo, el contenido sigue siendo el string de siempre (cero
+  // cambio de comportamiento) — con archivo, se arma como array de
+  // bloques: primero el/los bloque(s) del archivo (imagen/PDF/texto),
+  // después la pregunta del cliente, tal como recomienda Anthropic para
+  // contenido multimodal.
+  const content = archivoBlocks ? [...archivoBlocks, { type: 'text', text: userMessage }] : userMessage;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -287,7 +370,7 @@ async function callClaude(userMessage) {
       model: MODEL,
       max_tokens: 1200,
       system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }],
+      messages: [{ role: 'user', content }],
     }),
   });
 
@@ -769,17 +852,37 @@ const server = http.createServer((req, res) => {
       }
     }
     let body = '';
-    req.on('data', (chunk) => { body += chunk; });
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      body += chunk;
+      // Techo duro sobre el pedido entero (no solo el archivo en base64) —
+      // protege la memoria de Render (free tier, 512MB) de un POST enorme
+      // ANTES de siquiera intentar acumularlo todo o parsear JSON. Se deja
+      // margen extra sobre CHAT_FILE_MAX_BASE64_CHARS para el resto del
+      // JSON (mensaje, nombre, tipo).
+      if (body.length > CHAT_FILE_MAX_BASE64_CHARS + 2000000) {
+        tooLarge = true;
+        sendJSON(res, 413, { error: `El pedido es demasiado grande (máximo ${CHAT_FILE_MAX_MB}MB de archivo adjunto).` });
+        req.destroy();
+      }
+    });
     req.on('end', async () => {
+      if (tooLarge) return; // ya se respondió arriba, en el chequeo de tamaño
       let parsed;
       try { parsed = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON inválido.' }); }
       const userMessage = (parsed.message || '').trim();
       if (!userMessage) return sendJSON(res, 400, { error: 'Falta el mensaje.' });
       try {
-        const result = await callClaude(userMessage);
+        const result = await callClaude(userMessage, parsed.archivo || null);
         sendJSON(res, 200, result);
       } catch (err) {
         console.error('Error llamando a la API de Claude:', err.message);
+        // ArchivoError es un problema del archivo que mandó el cliente
+        // (tipo no admitido, demasiado pesado) — el mensaje ya está
+        // pensado para mostrarse tal cual, y es un 400 (culpa del
+        // pedido), no un 500 (culpa del servidor/la API).
+        if (err instanceof ArchivoError) return sendJSON(res, 400, { error: err.message });
         sendJSON(res, 500, { error: 'Mentis no pudo responder ahora mismo. Intentá de nuevo en un momento.' });
       }
     });
