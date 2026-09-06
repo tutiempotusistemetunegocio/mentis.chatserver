@@ -1,0 +1,70 @@
+name: Guía cero de Mentis
+
+# Dispara la generación/actualización de la "guía cero" (Módulo 02 →
+# guia-cero.js) — la guía de referencia FIJA que explica el sistema
+# completo, pensada para mandarse siempre junto con la guía del tema
+# puntual del reel cuando alguien responde el CTA. Pedido explícito de
+# Rodrigo (6/9/2026).
+#
+# A propósito SIN cron (a diferencia de "Guías semanales de Mentis"): esto
+# no es una guía nueva cada vez, es la MISMA guía que se sobreescribe — no
+# tiene sentido rehacerla sola cada semana, solo cuando Rodrigo la dispare
+# a mano porque quiere revisarla o mejorar el contenido.
+#
+# Configuración necesaria, una sola vez, en GitHub:
+#  Settings → Secrets and variables → Actions → New repository secret
+#   - MENTIS_GUIA_CERO_URL: la URL completa, por ejemplo
+#     https://mentis-chatserver.onrender.com/internal/guia-cero
+#   - MENTIS_GUIA_CERO_SECRET: el mismo valor que GUIA_CERO_SECRET en Render
+
+on:
+  workflow_dispatch: {} # solo a mano, desde la pestaña "Actions" de GitHub — ver nota arriba sobre por qué no hay cron
+
+jobs:
+  guia-cero:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Armar/actualizar la guía cero
+        run: |
+          # Render (plan free) se apaga solo tras 15 min sin uso, y este
+          # workflow no tiene ningún otro que lo despierte antes en el
+          # mismo día (a diferencia de daily-ingest, que corre temprano
+          # todas las mañanas) — así que el riesgo de arranque en frío acá
+          # es, si acaso, más alto. Mismo criterio que "Borrar guías y
+          # contenido" (admin-reset-content.yml): se reintenta hasta que el
+          # cuerpo de la respuesta sea JSON de verdad (empieza con "{"), no
+          # alcanza con mirar el código HTTP — Render puede devolver su
+          # propia página de "despertando" con código 200, que no es una
+          # respuesta real del servidor.
+          attempt=1
+          max_attempts=6
+          body=""
+          code=""
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "Intento $attempt de $max_attempts..."
+            response=$(curl -s -w "\n%{http_code}" --max-time 300 -X POST "${{ secrets.MENTIS_GUIA_CERO_URL }}" \
+              -H "x-guia-cero-secret: ${{ secrets.MENTIS_GUIA_CERO_SECRET }}" \
+              -H "content-type: application/json")
+          curl_exit=$?
+          body=$(echo "$response" | head -n -1)
+          code=$(echo "$response" | tail -n 1)
+          first_char=$(echo "$body" | head -c 1)
+          if [ "$curl_exit" -eq 0 ] && [ "$first_char" = "{" ]; then
+            break
+          fi
+          echo "Todavía no es una respuesta real del servidor (probablemente Render sigue despertando) — esperando 20s y reintentando."
+          sleep 20
+          attempt=$((attempt + 1))
+          done
+
+          echo "HTTP $code"
+          echo "$body"
+
+          if [ "$(echo "$body" | head -c 1)" != "{" ]; then
+            echo "La guía cero falló — el servidor nunca respondió con JSON real después de $max_attempts intentos (revisá si Render está caído de verdad, no es el problema de siempre de 'estaba dormido')."
+            exit 1
+          fi
+          if [ "$code" -ge 400 ]; then
+            echo "La guía cero falló — revisá el mensaje de arriba."
+            exit 1
+          fi
