@@ -18,16 +18,26 @@
   header .name{ font-family:'Big Shoulders',sans-serif; font-weight:800; text-transform:uppercase; }
   header .tag{ font-size:0.68rem; color:var(--accent-core); border:1px solid var(--accent-core); padding:1px 7px; text-transform:uppercase; }
   header .mode{ margin-left:auto; font-size:0.72rem; color:var(--ink-faint); font-family:'IBM Plex Mono',monospace; }
-  main{ max-width:680px; margin:0 auto; padding:24px 16px 120px; min-height:70vh; }
+  main{ max-width:680px; margin:0 auto; padding:24px 16px 140px; min-height:70vh; }
   .msg{ margin-bottom:18px; max-width:88%; padding:12px 16px; line-height:1.55; white-space:pre-wrap; }
   .msg.user{ margin-left:auto; background:var(--user-bubble); border:1px solid var(--rule); border-radius:14px 14px 4px 14px; }
   .msg.bot{ background:var(--paper-raised); border-left:3px solid var(--accent-core); border-radius:2px; }
   .msg.bot .label{ display:block; font-size:0.7rem; color:var(--accent-core); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; font-family:'IBM Plex Mono',monospace; }
-  form{ position:fixed; bottom:0; left:0; right:0; background:rgba(21,18,14,0.95); border-top:1px solid var(--rule); padding:14px 16px; display:flex; gap:10px; max-width:680px; margin:0 auto; }
-  form input{ flex:1; background:var(--paper-raised); border:1px solid var(--rule); color:var(--ink); padding:12px 14px; font-family:inherit; font-size:0.95rem; }
-  form input:focus{ outline:1px solid var(--accent-core); }
-  form button{ background:var(--accent-core); color:#1a1408; border:none; padding:0 20px; font-weight:600; cursor:pointer; }
+  .composer{ position:fixed; bottom:0; left:0; right:0; background:rgba(21,18,14,0.95); border-top:1px solid var(--rule); max-width:680px; margin:0 auto; }
+  .file-chip{ padding:10px 16px 0; }
+  .file-chip span{ display:inline-flex; align-items:center; gap:8px; background:var(--paper-raised); border:1px solid var(--accent-core); color:var(--ink-dim); font-size:0.78rem; padding:6px 10px; border-radius:20px; max-width:100%; }
+  .file-chip span .name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:220px; }
+  .file-chip button{ background:none; border:none; color:var(--ink-faint); cursor:pointer; font-size:0.9rem; padding:0; line-height:1; flex:0 0 auto; }
+  .file-chip button:hover{ color:var(--accent-product); }
+  form{ padding:14px 16px; display:flex; gap:8px; }
+  form input[type="text"]{ flex:1; min-width:0; background:var(--paper-raised); border:1px solid var(--rule); color:var(--ink); padding:12px 14px; font-family:inherit; font-size:0.95rem; }
+  form input[type="text"]:focus{ outline:1px solid var(--accent-core); }
+  form button[type="submit"]{ background:var(--accent-core); color:#1a1408; border:none; padding:0 20px; font-weight:600; cursor:pointer; }
   form button:disabled{ opacity:0.5; cursor:not-allowed; }
+  .icon-btn{ flex:0 0 auto; width:44px; background:var(--paper-raised); border:1px solid var(--rule); color:var(--ink); border-radius:6px; cursor:pointer; font-size:1.05rem; display:flex; align-items:center; justify-content:center; }
+  .icon-btn:hover{ border-color:var(--accent-core); }
+  .icon-btn.active{ color:#1a1408; background:var(--accent-core); border-color:var(--accent-core); }
+  .icon-btn:disabled{ opacity:0.35; cursor:not-allowed; }
 </style>
 </head>
 <body>
@@ -38,16 +48,28 @@
     <span class="mode" id="mode">verificando…</span>
   </header>
   <main id="chat"></main>
-  <form id="form">
-    <input id="input" type="text" placeholder="Escribí tu pregunta a Mentis…" autocomplete="off" required>
-    <button type="submit">Enviar</button>
-  </form>
+
+  <div class="composer">
+    <div class="file-chip" id="fileChip" hidden></div>
+    <form id="form">
+      <input type="file" id="fileInput" hidden
+        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,.md,.csv">
+      <button type="button" class="icon-btn" id="attachBtn" title="Adjuntar archivo (imagen, PDF o texto)">📎</button>
+      <button type="button" class="icon-btn" id="micBtn" title="Dictar por voz">🎤</button>
+      <input id="input" type="text" placeholder="Escribí tu pregunta a Mentis…" autocomplete="off" required>
+      <button type="submit">Enviar</button>
+    </form>
+  </div>
 
 <script>
   const chat = document.getElementById('chat');
   const form = document.getElementById('form');
   const input = document.getElementById('input');
   const modeLabel = document.getElementById('mode');
+  const attachBtn = document.getElementById('attachBtn');
+  const fileInput = document.getElementById('fileInput');
+  const fileChip = document.getElementById('fileChip');
+  const micBtn = document.getElementById('micBtn');
 
   fetch('/health').then(r => r.json()).then(d => {
     modeLabel.textContent = d.mode === 'live' ? '● en vivo' : '● modo demo';
@@ -69,19 +91,127 @@
     div.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
 
+  // --- Adjuntar archivo (imagen, PDF o texto) --------------------------------
+  // Pedido explícito de Rodrigo (6/9/2026): "que Mentis Premium tenga la
+  // opción de... poder cargar ficheros". El archivo se lee acá mismo (en el
+  // navegador) como base64 y viaja dentro del mismo POST /chat de siempre
+  // — el servidor decide qué hacer según el tipo (ver server.js,
+  // buildArchivoBlocks). MAX_FILE_MB replica el límite real del servidor
+  // (CHAT_FILE_MAX_MB en .env) solo para avisar temprano, del lado del
+  // cliente, en vez de mandar un archivo que el servidor va a rechazar
+  // igual — si alguna vez se cambia CHAT_FILE_MAX_MB en el servidor, este
+  // número también hay que actualizarlo a mano (no hay forma de que el
+  // navegador lo sepa antes de preguntarle a /health o similar).
+  const MAX_FILE_MB = 8;
+  let pendingFile = null; // { nombre, tipo, datosBase64 } o null
+
+  attachBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    fileInput.value = ''; // permite adjuntar el mismo archivo dos veces seguidas si hace falta
+    if (!file) return;
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+      addMsg(`"${file.name}" pesa más de ${MAX_FILE_MB}MB — no se puede adjuntar.`, 'bot');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = String(reader.result).split(',')[1] || '';
+      pendingFile = { nombre: file.name, tipo: file.type || 'application/octet-stream', datosBase64: base64 };
+      renderFileChip();
+    };
+    reader.onerror = () => addMsg(`No se pudo leer "${file.name}".`, 'bot');
+    reader.readAsDataURL(file);
+  });
+
+  function renderFileChip() {
+    fileChip.innerHTML = '';
+    if (!pendingFile) { fileChip.hidden = true; return; }
+    fileChip.hidden = false;
+    const span = document.createElement('span');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = '📎 ' + pendingFile.nombre;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = '✕';
+    removeBtn.title = 'Quitar archivo';
+    removeBtn.addEventListener('click', () => { pendingFile = null; renderFileChip(); });
+    span.appendChild(name);
+    span.appendChild(removeBtn);
+    fileChip.appendChild(span);
+  }
+
+  // --- Dictado por voz --------------------------------------------------------
+  // Pedido explícito de Rodrigo (6/9/2026): "que Mentis Premium tenga la
+  // opción de escribir por voz". Enteramente del lado del navegador (Web
+  // Speech API) — nunca toca el servidor, solo dicta texto adentro del
+  // mismo campo de siempre; el cliente sigue apretando "Enviar" como
+  // siempre. No todos los navegadores la soportan (Chrome/Edge/Safari sí,
+  // Firefox no) — si no está disponible, el botón queda deshabilitado con
+  // una explicación en el título, en vez de fallar en silencio al tocarlo.
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognitionCtor) {
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'es-ES';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    let recognizing = false;
+    let baseText = '';
+
+    recognition.addEventListener('start', () => {
+      recognizing = true;
+      baseText = input.value.trim() ? input.value.trim() + ' ' : '';
+      micBtn.classList.add('active');
+      micBtn.textContent = '⏹';
+      micBtn.title = 'Detener dictado';
+    });
+    recognition.addEventListener('result', (e) => {
+      let transcript = '';
+      for (let i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
+      input.value = baseText + transcript;
+    });
+    recognition.addEventListener('end', () => {
+      recognizing = false;
+      micBtn.classList.remove('active');
+      micBtn.textContent = '🎤';
+      micBtn.title = 'Dictar por voz';
+      input.focus();
+    });
+    recognition.addEventListener('error', (e) => {
+      recognizing = false;
+      micBtn.classList.remove('active');
+      micBtn.textContent = '🎤';
+      if (e.error !== 'no-speech' && e.error !== 'aborted') {
+        addMsg('No se pudo usar el micrófono (' + e.error + '). Revisá los permisos del navegador.', 'bot');
+      }
+    });
+    micBtn.addEventListener('click', () => {
+      if (recognizing) { recognition.stop(); return; }
+      try { recognition.start(); } catch (err) { /* ya estaba escuchando — se ignora */ }
+    });
+  } else {
+    micBtn.disabled = true;
+    micBtn.title = 'Dictado por voz no disponible en este navegador (probá con Chrome, Edge o Safari)';
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const message = input.value.trim();
     if (!message) return;
-    addMsg(message, 'user');
+    const archivo = pendingFile;
+    addMsg(message + (archivo ? `\n📎 ${archivo.nombre}` : ''), 'user');
     input.value = '';
     input.disabled = true;
+    pendingFile = null;
+    renderFileChip();
 
     try {
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify(archivo ? { message, archivo } : { message }),
       });
       const data = await res.json();
       addMsg(data.reply || data.error || 'No hubo respuesta.', 'bot');
