@@ -27,6 +27,12 @@ Corrección de dos partes:
 
 Como con el bug del PDF de páginas en blanco (ver `weekly-guides.md`), esto no se pudo probar contra una corrida real en el momento de escribirlo — la sintaxis está verificada, la heurística de "frase cortada" se probó con casos sueltos a mano, pero la confirmación real es la próxima vez que Rodrigo dispare el workflow.
 
+## Segundo bug real reportado por Rodrigo (6/9/2026, mismo día): texto invisible en los quiebres de página del PDF
+
+Después de que el arreglo de arriba quedó confirmado funcionando (bloques con títulos, frases completas), Rodrigo mandó capturas del PDF mostrando una frase cortada justo en el borde de una página, con la continuación (confirmada completa en el `.md`, o sea 100% un problema del PDF, no del contenido) sin aparecer en ningún lado — y aclaró que no era un caso aislado: "hay errores así por toda la guía, no solo ese que te mostré, eso fue solo un ejemplo".
+
+Este bug vive en `guide-pdf.js` (compartido con `weekly-guides.js`, ver la sección de bugs reales de `weekly-guides.md` para la explicación completa del mecanismo): `drawPageBackground()` pintaba el fondo de cada página nueva de una forma que, sin querer, pisaba el color de texto que pdfkit usa internamente para decidir en qué color seguir escribiendo después de un quiebre de página automático — dejando el texto que sigue escrito en el mismo color que el fondo (invisible, no borrado). Se confirmó la causa contra el código fuente real de pdfkit (no se pudo instalar pdfkit acá para probarlo corriendo) antes de escribir la corrección, en vez de adivinar. Ya corregido — mismo caveat de siempre: falta confirmar contra la próxima corrida real de la guía cero.
+
 ## Reglas de contenido — por qué son estas y no las genéricas del catálogo
 
 `weekly-guides.js` tiene su propio `VOICE_RULES` (tono, nunca revelar el mecanismo interno, atribuir citas textuales). La guía cero reutiliza ese mismo espíritu pero con un set de reglas más específico (`REGLAS_GUIA_CERO` en `guia-cero.js`), porque varias vienen de un "no" explícito de Rodrigo sobre ESTE contenido puntual — no son reglas de tono generales:

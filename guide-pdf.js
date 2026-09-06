@@ -36,10 +36,45 @@ const COLOR_AMBER = '#f2a65a';
 
 const MARGIN = { top: 76, bottom: 64, left: 60, right: 60 };
 
+// BUG REAL confirmado con guías reales (6/9/2026): texto que desaparecía
+// exactamente en los quiebres de página automáticos, en toda la guía (no un
+// caso aislado — Rodrigo lo confirmó: "hay errores así por toda la guía").
+// Se verificó la causa contra el código fuente real de pdfkit (no se pudo
+// instalar pdfkit en este entorno para probarlo corriendo, así que se leyó
+// el código de la librería para confirmarlo en vez de adivinar):
+//
+// `doc.fill(color)` (acá, `.fill(COLOR_BG)`) llama por dentro a
+// `doc.fillColor(color)`, que guarda el color en `doc._fillColor` — una
+// propiedad de JS común y corriente, SEPARADA del verdadero estado gráfico
+// de PDF que manejan `doc.save()`/`doc.restore()` (esos dos solo apilan la
+// matriz de transformación y emiten los operadores "q"/"Q" — nunca tocan
+// `_fillColor`). O sea: el `save()`/`restore()` de acá abajo no protege para
+// nada el color de relleno.
+//
+// ¿Por qué importa? Cuando un párrafo largo no entra en una página, pdfkit
+// agrega una página nueva solo (evento 'pageAdded', el mismo que dispara
+// esta función) y, en su propia lógica de ese salto (`nextSection()` en
+// line_wrapper.js, parte del código fuente de pdfkit), hace exactamente
+// esto para que el texto que sigue no cambie de color al pasar de página:
+// `if (doc._fillColor) doc.fillColor(...doc._fillColor)`. El problema es el
+// ORDEN: ese chequeo corre DESPUÉS de que ya se disparó 'pageAdded' — es
+// decir, después de que esta función ya pisó `doc._fillColor` con
+// [COLOR_BG, undefined]. Entonces pdfkit "restaura" el color del texto
+// siguiente al color de FONDO, no al color real que tenía (COLOR_INK,
+// COLOR_TEAL o COLOR_AMBER según el bloque). El texto sigue estando ahí,
+// en el lugar correcto — pero queda escrito en el mismo color que el fondo,
+// invisible a simple vista. Eso explica perfecto lo que reportó Rodrigo:
+// una frase que se corta justo en el borde de la página y la continuación
+// "no aparece en ningún lado" del PDF — no falta, está invisible.
+//
+// Corrección: guardar `doc._fillColor` antes de pintar el fondo y
+// devolverlo después, a mano, porque `save()`/`restore()` no lo hace.
 function drawPageBackground(doc) {
+  const previousFillColor = doc._fillColor;
   doc.save();
   doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLOR_BG);
   doc.restore();
+  doc._fillColor = previousFillColor;
 }
 
 // BUG REAL encontrado con guías reales (3/9/2026): las guías premium (con
