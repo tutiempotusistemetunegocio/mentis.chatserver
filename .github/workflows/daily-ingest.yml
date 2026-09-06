@@ -25,6 +25,35 @@ jobs:
   ingest:
     runs-on: ubuntu-latest
     steps:
+      - name: Despertar el servidor antes del pedido real
+        run: |
+          # Agregado 6/9/2026: Rodrigo confirmó que la corrida de la mañana
+          # casi nunca funciona (18 corridas: las que fallan son siempre las
+          # de la mañana temprano; las que salieron bien fueron disparadas a
+          # mano de noche) — mientras que corrida a mano más tarde en el día
+          # suele andar bien. Lectura más razonable: a las 10:00 UTC, Render
+          # (plan free) lleva toda la noche dormido (se apaga a los 15 min sin
+          # uso) — el primer pedido del día tiene que despertarlo Y ADEMÁS
+          # hacer el trabajo pesado (Dropbox + API de Claude) en el mismo
+          # golpe, y ese arranque en frío es lo más probable detrás del 502.
+          # Este paso separa las dos cosas: golpea /health (liviano, sin
+          # Dropbox ni Claude, ver server.js) hasta que responda 200, ANTES
+          # de disparar el pedido real de abajo. Si no despierta en el tiempo
+          # dado, se sigue igual con el pedido real — en el peor caso, el
+          # comportamiento es el mismo que antes de este cambio.
+          health_url="${{ secrets.MENTIS_INGEST_URL }}"
+          health_url="${health_url%/internal/daily-ingest}/health"
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$health_url" 2>/dev/null || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "Servidor despierto (intento $i, HTTP $code)."
+              exit 0
+            fi
+            echo "Intento $i: HTTP $code todavía — esperando 10s..."
+            sleep 10
+          done
+          echo "El servidor no confirmó estar despierto tras varios intentos — sigo igual con el pedido real, por si acaso."
+
       - name: Disparar la lectura diaria
         run: |
           # --max-time (afinado 2/9/2026, auditoría de confiabilidad): sin esto,
