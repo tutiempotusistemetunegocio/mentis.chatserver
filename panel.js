@@ -20,7 +20,7 @@
 // configuración está puesta, no que la API en sí esté respondiendo bien hoy
 // (para eso, la fuente real sigue siendo GitHub Actions).
 //
-// Tres rutas:
+// Cinco rutas:
 //  - GET /panel/<secreto>                → la página completa.
 //  - GET /panel/<secreto>/guia/<id>      → el texto de una guía puntual (para
 //    no tener que bajar el contenido de todas las guías en cada visita a
@@ -29,10 +29,21 @@
 //    (guide-pdf.js), si esta guía en particular llegó a tener uno — las
 //    generadas antes de que existiera ese módulo, o cuya subida falló, no lo
 //    tienen, y el link no aparece en la tabla para esas.
+//  - GET /panel/<secreto>/guia-cero      → el texto de la guía cero
+//    (guia-cero.js, 6/9/2026) — la guía de referencia fija del sistema
+//    completo, separada del catálogo de arriba (no tiene id, siempre es el
+//    mismo archivo).
+//  - GET /panel/<secreto>/guia-cero/pdf  → el PDF con diseño de la guía cero.
 
 const { getDropboxAccessToken } = require('./dropbox-auth');
 
 const GUIDES_FOLDER = process.env.DROPBOX_GUIDES_FOLDER || '/mentis-guias';
+// Guía cero (guia-cero.js, 6/9/2026) — archivo fijo, siempre el mismo
+// nombre, en la raíz de la carpeta de guías (no adentro de gratis/ ni
+// premium/, no forma parte del catálogo rotativo).
+const GUIA_CERO_MD = `${GUIDES_FOLDER}/guia-cero.md`;
+const GUIA_CERO_PDF = `${GUIDES_FOLDER}/guia-cero.pdf`;
+const GUIA_CERO_META = `${GUIDES_FOLDER}/guia-cero-meta.json`;
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 const MEDIA_FOLDER = process.env.DROPBOX_MEDIA_FOLDER || '/mentis-medios';
 const KNOWLEDGE_FOLDER = process.env.DROPBOX_KNOWLEDGE_FOLDER || '/mentis-reglas';
@@ -88,15 +99,18 @@ function connectionStatus() {
 
 async function loadPanelData() {
   const token = await getDropboxAccessToken();
-  const [catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels] = await Promise.all([
+  const [catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels, guiaCeroMeta] = await Promise.all([
     dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/content-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${MEDIA_FOLDER}/photo-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/video-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${KNOWLEDGE_FOLDER}/strategy-opportunities.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${KNOWLEDGE_FOLDER}/business-models.json`, { entries: [] }),
+    dropboxDownloadJSON(token, GUIA_CERO_META, null),
   ]);
-  return { token, catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels };
+  return {
+    token, catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels, guiaCeroMeta,
+  };
 }
 
 // Una tarjeta de prompt de video, para UNA parte (o el clip único de
@@ -156,6 +170,15 @@ async function renderPanel(secret) {
   const recentVideoPrompts = [...data.videoHistory.entries].slice(-8).reverse();
   const recentOpportunities = [...data.opportunities.entries].slice(-15).reverse();
   const recentBusinessModels = [...data.businessModels.entries].slice(-12).reverse();
+
+  const guiaCeroSection = `
+    <section>
+      <h2>Guía cero <span class="count">referencia fija del sistema — se manda siempre junto con la guía del tema del reel</span></h2>
+      ${data.guiaCeroMeta ? `
+        <p class="hint">"${esc(data.guiaCeroMeta.titulo)}"${data.guiaCeroMeta.subtitulo ? ` — ${esc(data.guiaCeroMeta.subtitulo)}` : ''}<br>Actualizada el ${esc((data.guiaCeroMeta.generatedAt || '').slice(0, 10))}${data.guiaCeroMeta.citas ? ` · ${data.guiaCeroMeta.citas} cita(s)` : ''}.</p>
+        <p><a href="/panel/${secret}/guia-cero" target="_blank">Ver el texto completo</a>${data.guiaCeroMeta.archivoPdf ? ` · <a href="/panel/${secret}/guia-cero/pdf" target="_blank">PDF</a>` : ' · <span class="dim">sin PDF</span>'}</p>
+      ` : '<p class="dim">Todavía no se generó — corré "Guía cero" desde GitHub Actions para armarla por primera vez. A diferencia del resto de las guías, esta es manual: se regenera solo cuando la disparás a mano, nunca sola.</p>'}
+    </section>`;
 
   const guidesSection = `
     <section>
@@ -224,7 +247,7 @@ async function renderPanel(secret) {
       <p class="dim">De la sección "Estrategia" del plano original, hoy existen las oportunidades de monetización de cara a la audiencia (detectadas por conocimiento) y, por separado, los modelos de negocio para Rodrigo mismo (arriba). Falta la parte basada en rendimiento real — qué ángulo/formato está funcionando mejor en redes, según datos de Metricool — y las mejoras a la herramienta misma; ninguna de las dos se puede construir todavía sin Metricool conectado. El resumen semanal por WhatsApp/panel tampoco existe todavía. Cuando se construyan, suman su parte acá, no reemplazan nada de lo de arriba.</p>
     </section>`;
 
-  return page('Panel personal', guidesSection + contentSection + strategySection + businessModelsSection + statusSection + pendingSection);
+  return page('Panel personal', guiaCeroSection + guidesSection + contentSection + strategySection + businessModelsSection + statusSection + pendingSection);
 }
 
 async function renderGuideContent(secret, id) {
@@ -246,6 +269,30 @@ async function renderGuidePdf(secret, id) {
   const entry = catalog.entries.find((e) => e.id === id);
   if (!entry || !entry.archivoPdf) return null;
   return dropboxDownloadBinary(token, `${GUIDES_FOLDER}/${entry.tipo}/${entry.archivoPdf}`);
+}
+
+// Guía cero (guia-cero.js, 6/9/2026) — a diferencia de renderGuideContent/
+// renderGuidePdf de arriba, no busca nada en guide-catalog.json: siempre
+// es el mismo archivo fijo (GUIA_CERO_MD/GUIA_CERO_PDF), así que no hace
+// falta ningún id.
+async function renderGuiaCeroContent() {
+  const token = await getDropboxAccessToken();
+  try {
+    return await dropboxDownloadText(token, GUIA_CERO_MD);
+  } catch {
+    return null; // todavía no se generó ninguna vez
+  }
+}
+
+async function renderGuiaCeroPdf() {
+  const token = await getDropboxAccessToken();
+  const meta = await dropboxDownloadJSON(token, GUIA_CERO_META, null);
+  if (!meta || !meta.archivoPdf) return null;
+  try {
+    return await dropboxDownloadBinary(token, GUIA_CERO_PDF);
+  } catch {
+    return null;
+  }
 }
 
 function page(title, body) {
@@ -290,4 +337,6 @@ function page(title, body) {
 </div></body></html>`;
 }
 
-module.exports = { renderPanel, renderGuideContent, renderGuidePdf };
+module.exports = {
+  renderPanel, renderGuideContent, renderGuidePdf, renderGuiaCeroContent, renderGuiaCeroPdf,
+};

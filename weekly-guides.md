@@ -106,3 +106,7 @@ Sin `GUIDES_SECRET` configurado en Render, la ruta queda completamente cerrada, 
 ## Dónde aparece el resultado
 
 Cada guía queda en `/mentis-guias/gratis/` o `/mentis-guias/premium/` dentro del App folder de Dropbox, más el índice `guide-catalog.json` con título, categorías, fecha y si usó alguna cita. Todo esto también se ve, ya ordenado y con links para leer cada guía, en el [panel personal](panel.md).
+
+## Distinta de la guía cero
+
+Este catálogo es a propósito rotativo: guías nuevas cada semana, nunca repitiendo combinación de categorías. Para la pieza que Rodrigo pidió que sea siempre LA MISMA — la guía de referencia del sistema completo, pensada para mandarse junto con la guía puntual del reel cuando alguien responde el CTA — ver [`guia-cero.md`](guia-cero.md) (Módulo 02 → `guia-cero.js`, 6/9/2026). Comparten el mismo formato de "bloques" y el mismo renderer de PDF, pero son dos módulos separados con su propio secreto y su propio workflow.

@@ -559,6 +559,32 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Guía cero (Módulo 02 → guia-cero.js) — la guía de referencia FIJA que
+  // explica el sistema completo, pensada para mandarse siempre junto con la
+  // guía del tema puntual del reel cuando alguien responde el CTA. Pedido
+  // explícito de Rodrigo (6/9/2026). A diferencia de /internal/weekly-guides
+  // (que arma varias guías nuevas del catálogo rotativo), esto siempre
+  // sobreescribe la MISMA guía — no genera una nueva cada vez que corre.
+  // Mismo patrón de secreto que el resto de las rutas /internal/*, pero
+  // disparada a mano (ver .github/workflows/guia-cero.yml, sin cron): no
+  // tiene sentido rehacerla todas las semanas, solo cuando Rodrigo quiera
+  // revisarla o mejorarla.
+  if (req.method === 'POST' && req.url === '/internal/guia-cero') {
+    const expected = process.env.GUIA_CERO_SECRET;
+    const got = req.headers['x-guia-cero-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'GUIA_CERO_SECRET no está configurado — la guía cero está desactivada hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runGuiaCero } = require('./guia-cero');
+    runGuiaCero()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error generando la guía cero:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   // Modelos de negocio para monetizar (Módulo 08 → business-models.js).
   // Pedido explícito de Rodrigo (5/9/2026): "que el sistema, con el
   // conocimiento que tiene, me dé sugerencias de negocios para generar
@@ -654,7 +680,39 @@ const server = http.createServer((req, res) => {
     const urlSecret = parts[1] || null;
     if (!expected || !urlSecret || urlSecret !== expected) { res.writeHead(404); return res.end('No encontrado'); }
     // eslint-disable-next-line global-require
-    const { renderPanel, renderGuideContent, renderGuidePdf } = require('./panel');
+    const {
+      renderPanel, renderGuideContent, renderGuidePdf, renderGuiaCeroContent, renderGuiaCeroPdf,
+    } = require('./panel');
+    // Guía cero (6/9/2026) — rutas propias, separadas de /guia/<id>, porque
+    // no vive en el catálogo (guide-catalog.json): siempre el mismo archivo
+    // fijo. 'guia-cero' nunca puede confundirse con un id real del catálogo
+    // (esos siempre empiezan con la fecha, ej. "2026-09-06-gratis-...").
+    if (parts[2] === 'guia-cero' && parts[3] === 'pdf') {
+      renderGuiaCeroPdf()
+        .then((buffer) => {
+          if (buffer === null) { res.writeHead(404); return res.end('La guía cero todavía no tiene PDF.'); }
+          res.writeHead(200, { 'content-type': 'application/pdf' });
+          res.end(buffer);
+        })
+        .catch((err) => {
+          console.error('Error descargando el PDF de la guía cero:', err.message);
+          res.writeHead(500); res.end('No se pudo descargar el PDF: ' + err.message);
+        });
+      return;
+    }
+    if (parts[2] === 'guia-cero') {
+      renderGuiaCeroContent()
+        .then((text) => {
+          if (text === null) { res.writeHead(404); return res.end('La guía cero todavía no se generó.'); }
+          res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end(text);
+        })
+        .catch((err) => {
+          console.error('Error leyendo la guía cero:', err.message);
+          res.writeHead(500); res.end('No se pudo leer la guía cero: ' + err.message);
+        });
+      return;
+    }
     if (parts[2] === 'guia' && parts[3] && parts[4] === 'pdf') {
       renderGuidePdf(urlSecret, decodeURIComponent(parts[3]))
         .then((buffer) => {

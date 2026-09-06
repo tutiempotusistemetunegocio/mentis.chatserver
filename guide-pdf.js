@@ -78,7 +78,11 @@ function drawCover(doc, guide) {
   doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR_TEAL);
   doc.text('MENTIS', MARGIN.left, 64, { characterSpacing: 2 });
 
-  const badgeText = guide.tipo === 'premium' ? 'GUÍA PREMIUM' : 'GUÍA GRATIS';
+  // 'sistema' es la guía cero (guia-cero.js, 6/9/2026) — la referencia fija
+  // del sistema completo, distinta del catálogo rotativo de gratis/premium.
+  // No se vende por separado, así que comparte el color teal de "gratis",
+  // pero con su propio texto para que se distinga a simple vista en el panel.
+  const badgeText = guide.tipo === 'premium' ? 'GUÍA PREMIUM' : guide.tipo === 'sistema' ? 'GUÍA DEL SISTEMA' : 'GUÍA GRATIS';
   const badgeColor = guide.tipo === 'premium' ? COLOR_AMBER : COLOR_TEAL;
   doc.font('Helvetica-Bold').fontSize(9).fillColor(badgeColor);
   doc.text(badgeText, 0, 66, { width: doc.page.width - MARGIN.right, align: 'right', characterSpacing: 1 });
