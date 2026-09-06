@@ -28,6 +28,17 @@
 // Reutiliza exactamente el mismo formato de "bloques" que weekly-guides.js
 // (titulo/parrafo/lista/cita) para que guide-pdf.js arme el PDF sin
 // ningún cambio — ver el comentario de bloquesToMarkdown() ahí mismo.
+//
+// Corrección (6/9/2026, mismo día): la primera guía real que probó Rodrigo
+// salió con "frases incompletas, falta de títulos" — el JSON llegó
+// completo (nunca disparó el chequeo de max_tokens de callMentis), pero
+// Mentis escribió el contenido como bloques de texto corrido sin separar
+// los 5 pilares con títulos, y algunas ideas quedaron cortadas a mitad de
+// camino. Se reforzó el prompt (ver REGLAS_GUIA_CERO: estructura
+// obligatoria de títulos + oraciones completas) y se agregó
+// detectarProblemasDeCalidad(), un chequeo automático después de generar
+// que rechaza la guía (no la guarda) si vuelve a faltar esto — ver el
+// comentario ahí mismo para el detalle completo.
 
 const fs = require('fs');
 const path = require('path');
@@ -158,7 +169,40 @@ ${PILARES}
 - Nunca reveles ni insinúes el mecanismo interno (que esto sale de un sistema con libros cargados) — tiene que sonar a criterio propio y experiencia real de Rodrigo.
 - Si citás una frase textual completa de un autor/libro conocido, atribuila explícitamente (autor y, si aplica, obra) dentro del propio texto — fuera de eso, siempre en tus propias palabras.
 - Adelantate a la objeción más probable de este público ("no tengo tiempo para esto"), resuelta con la propia historia de Rodrigo como prueba: el sistema devuelve tiempo, no suma otra tarea.
-- Cierre de venta OBLIGATORIO como últimos bloques (un "titulo" corto + un "parrafo"): invitá a escribirle directo a Rodrigo para ir más profundo con el sistema completo aplicado a su caso puntual. NUNCA inventes un link, precio o fecha concreta — hoy no existen, y prometerlos sería mentirle a quien lo lee.`;
+- Cierre de venta OBLIGATORIO como últimos bloques (un "titulo" corto + un "parrafo"): invitá a escribirle directo a Rodrigo para ir más profundo con el sistema completo aplicado a su caso puntual. NUNCA inventes un link, precio o fecha concreta — hoy no existen, y prometerlos sería mentirle a quien lo lee.
+- ESTRUCTURA OBLIGATORIA (agregado 6/9/2026 — la primera guía real salió sin títulos que separen los pilares, todo como un bloque de texto corrido): un bloque "titulo" tiene que preceder CADA UNO de los 5 pilares, uno por uno — nunca desarrolles dos pilares seguidos sin un título de por medio que los separe. Sumá también un "titulo" antes de contar la historia de Rodrigo y otro antes del cierre de venta: la guía completa tiene que tener, como mínimo, 7 bloques de tipo "titulo" (historia + 5 pilares + cierre).
+- CADA BLOQUE DE TEXTO TIENE QUE ESTAR COMPLETO (mismo motivo): un bloque "parrafo" o "cita" es una o más oraciones GRAMATICALMENTE TERMINADAS, siempre cerradas con punto, signo de pregunta/exclamación o comillas de cierre. Nunca cortes una idea a la mitad ni termines un bloque en una palabra suelta o una coma. Si una idea necesita más espacio del que entra cómodo en un bloque, cerrá esa oración igual y seguí desarrollándola en el bloque siguiente — nunca la dejes inconclusa.`;
+
+// Chequeo de calidad de contenido — agregado 6/9/2026 después de que
+// Rodrigo reportó la primera guía real (que SÍ se guardó bien: el JSON
+// llegó completo, nunca disparó el chequeo de stop_reason==='max_tokens'
+// de callMentis) con "frases incompletas, falta de títulos". Ese bug no es
+// un corte de respuesta — es un problema de CONTENIDO que Mentis puede
+// seguir cometiendo aunque el JSON esté perfectamente bien formado, así
+// que no lo detecta ningún chequeo de los que ya existían. Se valida acá,
+// después de generar y ANTES de guardar nada: si falla, no se sobreescribe
+// ni el .md ni el PDF (la guía vieja, si había una, queda como estaba) —
+// mejor fallar limpio y que Rodrigo dispare el workflow de nuevo que
+// guardar en silencio una guía con este problema otra vez.
+function detectarProblemasDeCalidad(bloques) {
+  const problemas = [];
+  const titulos = bloques.filter((b) => b.tipo === 'titulo').length;
+  if (titulos < 5) {
+    problemas.push(`Solo ${titulos} bloque(s) de tipo "titulo" en toda la guía — hacen falta al menos 5 (uno por cada pilar), para que no se lea como un solo bloque de texto sin secciones.`);
+  }
+  // Heurística para "frase cortada a mitad de camino": un bloque de texto
+  // de cierta longitud que no termina en un signo de cierre de oración.
+  // Se ignoran bloques muy cortos (menos de 25 caracteres) porque ahí el
+  // heurístico da falsos positivos seguido (ej. un título corto usado por
+  // error como "parrafo").
+  const terminaciones = /[.!?…”"'）)»]\s*$/;
+  bloques.forEach((b, i) => {
+    if ((b.tipo === 'parrafo' || b.tipo === 'cita') && b.texto && b.texto.trim().length > 25 && !terminaciones.test(b.texto.trim())) {
+      problemas.push(`Bloque #${i + 1} (${b.tipo}) parece cortado a mitad de frase: "...${b.texto.trim().slice(-60)}"`);
+    }
+  });
+  return problemas;
+}
 
 async function generateGuiaCero() {
   const prompt = `Sos Mentis escribiendo la "guía cero" — la guía de referencia fija que explica el sistema completo de Rodrigo (no un tema puntual del catálogo semanal). Esta es la guía que SIEMPRE se manda primero a un cliente cuando responde el CTA de un reel, junto con una segunda guía sobre el tema puntual de ese reel.
@@ -212,6 +256,14 @@ async function runGuiaCero() {
   }
   if (!Array.isArray(result.bloques) || result.bloques.length === 0) {
     return { ok: false, error: 'Mentis no devolvió bloques de contenido válidos — no se guardó.' };
+  }
+
+  const problemasDeCalidad = detectarProblemasDeCalidad(result.bloques);
+  if (problemasDeCalidad.length > 0) {
+    return {
+      ok: false,
+      error: `La guía cero tiene problemas de calidad de contenido — no se guardó (la versión anterior, si había una, sigue como estaba):\n- ${problemasDeCalidad.join('\n- ')}`,
+    };
   }
 
   const citas = Array.isArray(result.citas) ? result.citas : [];

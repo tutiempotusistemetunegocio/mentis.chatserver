@@ -16,6 +16,17 @@ La idea acordada con Rodrigo: cuando un lead responde el CTA de un reel (comenta
 
 Honesto sobre lo que falta: el mecanismo que elige automáticamente cuál guía del catálogo matchea mejor con el ángulo del reel del día todavía no está construido. Y el envío en sí (mandar cualquier guía por ManyChat cuando alguien comenta la palabra clave) tampoco existe todavía — depende de que Rodrigo conecte ManyChat, igual que aclara `weekly-guides.md`. Esto resuelve la primera mitad (la guía cero fija) tal como se pidió explícitamente.
 
+## Bug real reportado por Rodrigo (6/9/2026, mismo día): frases incompletas y sin títulos
+
+Primera corrida real, primer reporte: "esta funcionando. pero la guía tiene errores" → "frases incompletas, falta de titulos". Importante entender qué NO fue esto: el JSON de Mentis llegó completo y bien formado — nunca disparó el chequeo de `stop_reason === 'max_tokens'` que ya existía en `callMentis` (el mismo que atrapó el bug real de las guías premium del catálogo, ver `weekly-guides.md`). Es decir, no fue una respuesta cortada por falta de espacio: fue un problema de **contenido**. El prompt original le pedía a Mentis que desarrollara los 5 pilares, pero nunca le exigía explícitamente un bloque `"titulo"` por pilar — así que Mentis escribió todo como bloques de texto corrido, sin separadores, y en el camino algunas ideas quedaron sin terminar.
+
+Corrección de dos partes:
+
+1. **Prompt más explícito** (`REGLAS_GUIA_CERO`): ahora exige, en mayúsculas, una estructura mínima obligatoria — un `"titulo"` antes de la historia, uno antes de cada uno de los 5 pilares, y uno antes del cierre (mínimo 7 títulos en total) — y exige que cada bloque de texto termine en una oración gramaticalmente cerrada, nunca a mitad de camino.
+2. **Chequeo automático después de generar** (`detectarProblemasDeCalidad()` en `guia-cero.js`): cuenta los bloques de tipo `"titulo"` (rechaza si hay menos de 5) y revisa que ningún bloque de texto de más de 25 caracteres termine sin un signo de cierre de oración (`.`, `?`, `!`, comillas de cierre, etc.). Si detecta cualquiera de los dos problemas, **no guarda nada** — ni el `.md` ni el PDF se sobreescriben, la guía anterior (si había una) queda como estaba — y devuelve el error explicando exactamente qué faltó, para disparar el workflow de nuevo en vez de quedarse con una guía rota en silencio.
+
+Como con el bug del PDF de páginas en blanco (ver `weekly-guides.md`), esto no se pudo probar contra una corrida real en el momento de escribirlo — la sintaxis está verificada, la heurística de "frase cortada" se probó con casos sueltos a mano, pero la confirmación real es la próxima vez que Rodrigo dispare el workflow.
+
 ## Reglas de contenido — por qué son estas y no las genéricas del catálogo
 
 `weekly-guides.js` tiene su propio `VOICE_RULES` (tono, nunca revelar el mecanismo interno, atribuir citas textuales). La guía cero reutiliza ese mismo espíritu pero con un set de reglas más específico (`REGLAS_GUIA_CERO` en `guia-cero.js`), porque varias vienen de un "no" explícito de Rodrigo sobre ESTE contenido puntual — no son reglas de tono generales:
