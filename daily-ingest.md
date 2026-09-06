@@ -1,5 +1,15 @@
 # Lectura diaria de la carpeta de alimentación — Módulo 01 → conocimiento
 
+## La corrida de la mañana casi nunca funcionaba — arreglado (6/9/2026)
+
+Rodrigo lo confirmó mirando el historial completo de corridas en GitHub Actions: de 18 corridas, las que fallan con HTTP 502 son casi siempre las de la mañana temprano (el cron de las 10:00 UTC), mientras que dispararla a mano más tarde en el día (de noche, por ejemplo) solía funcionar bien.
+
+La causa más probable: Render (plan free) se apaga solo a los 15 minutos sin uso, y a las 10:00 UTC lleva toda la noche dormido. El primer pedido del día tenía que despertarlo Y ADEMÁS hacer el trabajo pesado (bajar de Dropbox, clasificar con la API de Claude) en el mismo golpe — ese arranque en frío es la explicación más razonable detrás del 502, mucho más probable que un problema de memoria real (que daría un error distinto, o un timeout de curl en vez de un 502 devuelto por el propio Render).
+
+**Arreglo**: `daily-ingest.yml` ahora tiene un paso previo ("Despertar el servidor antes del pedido real") que golpea `GET /health` (una ruta liviana, sin Dropbox ni Claude, agregada en `server.js` para esto) hasta que responde 200, antes de disparar el pedido real de siempre. Si Render tarda en despertar, este paso espera; si no despierta en el tiempo dado (1 minuto, 6 intentos de 10s), sigue igual con el pedido real — en el peor caso, el comportamiento es el mismo que antes de este cambio, nunca peor.
+
+Honesto: esto no se pudo confirmar contra los logs reales de Render (esta sesión no tiene acceso a ese dashboard) — es la lectura más razonable del patrón que muestra el historial de GitHub Actions. Si después de este cambio la corrida de la mañana sigue fallando, el siguiente paso es mirar los logs de Render en Render mismo (pestaña "Logs", filtrando por la hora de la falla) para ver si dice algo más específico (por ejemplo, un reinicio por memoria).
+
 **Ya está implementado**, no es solo una especificación: la lógica completa vive en `daily-ingest.js`, corriendo dentro del mismo servidor (`mentis-chat-server`, Módulo 08) — expuesta como la ruta protegida `POST /internal/daily-ingest`. Esto reemplaza la idea original de una sesión aparte de Claude Code corriendo la tarea: en vez de eso, para cada libro nuevo el servidor le hace una llamada directa a la API de Claude para que decida a qué categorías aporta y sintetice los principios — sigue siendo razonamiento real, no un script puramente mecánico, pero corre adentro del mismo proceso que ya tiene las claves configuradas en Render, sin que ningún secreto tenga que viajar a ningún otro lado. Esta es la diferencia con `sync-dropbox.js` / `push-dropbox.js`, que son mecánicos de verdad (bajar/subir archivos tal cual) y no necesitan que Claude razone nada.
 
 Aclaración explícita de Rodrigo, ya cumplida: esto corre **en la nube**, nunca en su computadora — el servidor vive en Render, se dispara desde GitHub Actions, y nada de esto depende de que Rodrigo tenga algo instalado o prendido de su lado.
