@@ -1,5 +1,19 @@
 # Video diario — Módulo 03 → clip generado con Higgsfield
 
+## Actualización (6/9/2026): reels sin voz, foco en música/ambiente/captions, y clips de dos partes cuando el ángulo lo pida
+
+Conversación completa con Rodrigo sobre "cómo armamos el reel final" (voz, edición, herramientas todo-en-uno) terminó en una definición mucho más simple que lo que se venía explorando:
+
+**"No quiero muchos videos con voz. Prefiero videos con música, ambiente que generen interés, y con captions."** Esto saca de la mesa toda la parte de narración/voz (ElevenLabs, edición con voz sincronizada) — el reel de 12s, con música de fondo y texto en pantalla, YA ES el formato final, no un paso intermedio a esperar. No hace falta construir nada nuevo para esto: es exactamente lo que `buildManualHiggsfieldPrompt()` ya arma desde el 3/9/2026 (ver la sección de abajo) — clip cinematográfico + música + caption, pensado para pegarse en la interfaz web de Higgsfield (plan Plus).
+
+**"Utilizando mi imagen"** — también ya construido: desde el 3/9/2026, cuando `daily-photo.js` eligió una foto para hoy, el pedido a Higgsfield usa esa foto real como base (`image-to-video`, no texto-a-video). No hizo falta ningún cambio para esto tampoco — ya era el comportamiento por defecto.
+
+**Lo único genuinamente nuevo: "puedes hacer dos clips de doce segundos, parte uno, parte dos"** — antes, cada día generaba como máximo UN clip de 12s, sin importar si el ángulo necesitaba más espacio. Ahora `daily-script.js` decide, día a día, si el ángulo de hoy entra en un solo momento o si realmente tiene dos (`dosPartes: true`) — Parte 1 planta el gancho/problema, Parte 2 es la resolución, con su propio texto en pantalla que funde el cierre con la invitación a comentar "MENTIS" (el CTA visual, no solo el CTA escrito en la descripción del post). Por defecto sigue siendo un solo clip — dos partes es la excepción, para no duplicar sin necesidad el costo/tiempo de cada pedido a Higgsfield (cada parte es un pedido real, con su propio consumo de créditos).
+
+Cómo se traduce esto técnicamente: `daily-media.js` ahora arma una lista de una o dos "partes" a partir de lo que devolvió `daily-script.js`, y le pide a Higgsfield un clip por cada una (misma foto de hoy para las dos, si hay). Cada parte tiene su propio webhook (mismo secreto y fecha de siempre, más `/1` o `/2` al final de la URL) y su propio archivo final en Dropbox (`<fecha>-clip-parte1.mp4`, `<fecha>-clip-parte2.mp4`, en vez de `<fecha>-clip.mp4`). Los días normales (la mayoría) no cambian en nada — ni la URL del webhook ni el nombre del archivo llevan ningún sufijo extra. El [panel personal](panel.md) muestra una tarjeta de prompt por parte cuando el día tiene dos.
+
+**Elección de foto**: la misma foto del día se usa para las dos partes cuando hay dos — `daily-photo.js` no cambió, sigue eligiendo una sola foto por día. Elegir una foto distinta para cada parte queda pendiente para una versión futura si hiciera falta.
+
 ## Actualización (3/9/2026): contenido del prompt reordenado, foto del día conectada, música/captions siguen sin construir
 
 Tres pedidos de Rodrigo en el mismo mensaje, tratados por separado:
@@ -59,12 +73,12 @@ Antes, si `submitHiggsfieldClip` fallaba (como con este 404), TODO se perdía �
 1. **`POST /internal/daily-media`** (disparado por GitHub Actions, después de que corrió el guion diario):
    - Trae el historial de contenido más reciente de Dropbox.
    - Busca la entrada de hoy con `tipo: "reel"` Y `formato: "reel"` (ver el bug corregido más abajo). Si no hay (fin de semana, carrusel, o el guion diario todavía no corrió), no pide nada — responde `submitted: false` con el motivo.
-   - Si hay, arma un prompt visual corto a partir del ángulo del guion (con el contenido temático primero, el estilo cinematográfico después) y le pide a Higgsfield un clip vertical de 12s (modelo Seedance Pro Fast — cambiar de modelo es una línea en `daily-media.js`). Si `daily-photo.js` ya eligió una foto para hoy, el pedido usa esa foto como imagen de partida (image-to-video); si no, es texto-a-video puro.
-   - Responde con el `request_id` del pedido. El clip en sí todavía no está listo en este momento — Higgsfield tarda en generarlo.
+   - Si hay, arma una o dos "partes" según haya marcado `daily-script.js` (`dosPartes` — ver la actualización del 6/9/2026 arriba) y, para cada una, un prompt visual corto (con el contenido temático primero, el estilo cinematográfico después) — le pide a Higgsfield un clip vertical de 12s por parte (modelo Seedance Pro Fast — cambiar de modelo es una línea en `daily-media.js`). Si `daily-photo.js` ya eligió una foto para hoy, cada pedido usa esa misma foto como imagen de partida (image-to-video); si no, es texto-a-video puro.
+   - Responde con el/los `request_id` del pedido (o los pedidos). El clip en sí todavía no está listo en este momento — Higgsfield tarda en generarlo.
 
-2. **`POST /webhook/higgsfield-listo/<secreto>/<fecha>`** (Higgsfield llama acá solo cuando termina):
-   - Si el clip salió bien (`status: "completed"`), lo descarga de la URL que da Higgsfield y lo sube a Dropbox como `<fecha>-clip.mp4`, junto a los guiones del mismo día.
-   - Si falló o fue rechazado por moderación de contenido (`failed`/`nsfw`), no rompe nada — Rodrigo sigue teniendo el guion en texto, solo no hay clip ese día.
+2. **`POST /webhook/higgsfield-listo/<secreto>/<fecha>[/<parte>]`** (Higgsfield llama acá solo cuando termina — una vez por parte, si son dos):
+   - Si el clip salió bien (`status: "completed"`), lo descarga de la URL que da Higgsfield y lo sube a Dropbox como `<fecha>-clip.mp4` (un solo clip) o `<fecha>-clip-parte1.mp4`/`<fecha>-clip-parte2.mp4` (dos partes), junto a los guiones del mismo día.
+   - Si falló o fue rechazado por moderación de contenido (`failed`/`nsfw`), no rompe nada — Rodrigo sigue teniendo el guion en texto (y la otra parte, si solo falló una de las dos), solo no hay clip para esa parte ese día.
 
 ## Por qué el secreto va en la URL, no en un header
 
@@ -83,10 +97,10 @@ Sin `MEDIA_SECRET` configurado en Render, la ruta de disparo queda completamente
 
 ## Dónde aparece el resultado
 
-El clip queda en la misma carpeta `/mentis-contenido` de Dropbox donde ya están los guiones — `<fecha>-clip.mp4`, junto a `<fecha>-reel.md`.
+El clip (o los dos clips, en un día de dos partes) queda en la misma carpeta `/mentis-contenido` de Dropbox donde ya están los guiones — `<fecha>-clip.mp4` (o `<fecha>-clip-parte1.mp4` / `<fecha>-clip-parte2.mp4`), junto a `<fecha>-reel.md`.
 
 ## Lo que falta para que este paso quede completo
 
-- **Armado del reel completo**: hoy esto entrega un clip corto de gancho, no el video final montado — falta la edición (varios clips) para cuando se quiera algo más largo que 12s.
-- **Música y captions**: el sistema ya arma el `promptCompleto` con las instrucciones (ver la actualización del 3/9/2026 arriba) — falta la primera confirmación real de Rodrigo probándolo en la interfaz web de Higgsfield, para saber si hace falta ajustar el texto.
-- **Control de calidad pre-publicación**: analizar el clip ya generado y decidir si tiene potencial antes de usarlo — depende de que el armado final exista primero.
+- **Música y captions**: el sistema ya arma el/los `promptCompleto` con las instrucciones (ver las actualizaciones de arriba) — falta la primera confirmación real de Rodrigo probándolo en la interfaz web de Higgsfield, para saber si hace falta ajustar el texto.
+- **Control de calidad pre-publicación**: analizar el clip ya generado y decidir si tiene potencial antes de usarlo — todavía no construido.
+- **Concatenar clips en un solo archivo**: por decisión explícita de Rodrigo (6/9/2026), un día de dos partes se publica como DOS clips (parte 1 y parte 2), no como uno solo unido por edición — así que unir varios clips de 12s en un único video más largo sigue sin construirse, y no es el plan actual (ver la actualización del 6/9/2026 arriba).

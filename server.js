@@ -484,12 +484,16 @@ const server = http.createServer((req, res) => {
 
   // Aviso de Higgsfield cuando el clip terminó (o falló). Higgsfield no
   // manda headers propios, así que el secreto y la fecha viajan como
-  // segmentos de la propia URL — ver daily-media.js para el detalle.
+  // segmentos de la propia URL — ver daily-media.js para el detalle. Desde
+  // el 6/9/2026 (pedido de Rodrigo: reels de dos partes cuando el ángulo lo
+  // amerite) puede venir un quinto segmento extra con el número de parte
+  // ("1" o "2") — ausente en los días de siempre, que no cambian en nada.
   if (req.method === 'POST' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/webhook/higgsfield-listo/')) {
     const parts = req.url.split('?')[0].replace(/\/+$/, '').split('/').filter(Boolean);
-    // parts = ['webhook', 'higgsfield-listo', '<secreto>', '<fecha>']
+    // parts = ['webhook', 'higgsfield-listo', '<secreto>', '<fecha>', '<parte>?']
     const urlSecret = parts[2] || null;
     const dateStr = parts[3] || null;
+    const parte = parts[4] || null;
     const expected = process.env.HIGGSFIELD_WEBHOOK_SECRET;
     if (!expected) return sendJSON(res, 501, { error: 'HIGGSFIELD_WEBHOOK_SECRET no está configurado.' });
     if (urlSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
@@ -501,7 +505,7 @@ const server = http.createServer((req, res) => {
       try { parsed = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON inválido.' }); }
       // eslint-disable-next-line global-require
       const { handleHiggsfieldWebhook } = require('./daily-media');
-      handleHiggsfieldWebhook(dateStr, parsed)
+      handleHiggsfieldWebhook(dateStr, parsed, parte)
         .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
         .catch((err) => {
           console.error('Error guardando el clip de Higgsfield:', err.message);

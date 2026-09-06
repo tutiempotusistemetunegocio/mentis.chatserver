@@ -76,6 +76,21 @@
 // web) — es la palabra de Rodrigo sobre su propia cuenta, y la forma real de
 // confirmarlo es que lo pruebe una vez con el prompt completo y cuente qué
 // pasó.
+//
+// Dos partes (agregado 6/9/2026, pedido explícito de Rodrigo — reels sin
+// voz, solo música/ambiente/captions, con la opción de "hacer dos clips de
+// doce segundos, parte uno, parte dos" cuando el ángulo lo amerite):
+// daily-script.js ahora puede marcar el guion de hoy con `dosPartes: true` y
+// dos escenas/captions separadas (Parte 1 = gancho, Parte 2 = resolución +
+// invitación a comentar "MENTIS"). Cuando pasa eso, este módulo pide DOS
+// clips a Higgsfield en vez de uno — misma foto de hoy para las dos (no se
+// duplica la elección de foto, eso sigue siendo trabajo de daily-photo.js),
+// cada uno con su propio webhook (mismo secreto y fecha, más un segmento
+// `/1` o `/2` al final de la URL para distinguirlos) y su propio archivo
+// final (`<fecha>-clip-parte1.mp4`, `<fecha>-clip-parte2.mp4`). Los días
+// normales (dosPartes: false, la mayoría) siguen exactamente igual que
+// antes — un solo pedido, un solo `<fecha>-clip.mp4`, sin ningún segmento
+// extra en la URL del webhook, para no romper nada de lo que ya funciona.
 
 const fs = require('fs');
 const path = require('path');
@@ -383,38 +398,64 @@ async function runDailyMedia(webhookBaseUrl) {
     return { ok: true, submitted: false, date: dateStr, reason: 'Hoy no hay guion de tipo "reel" (formato reel, no carrusel) en el historial (fin de semana, carrusel, o daily-script.js todavía no corrió) — no hay ángulo para convertir en clip.' };
   }
 
-  const prompt = buildVisualPrompt(todayEntry);
-  // Prompt aparte, para pegar a mano en la interfaz web de Higgsfield (plan
-  // Plus) — incluye música y captions, que la API no soporta. Ver el
-  // comentario largo junto a buildManualHiggsfieldPrompt.
-  const promptCompleto = buildManualHiggsfieldPrompt(todayEntry);
-  const webhookUrl = `${webhookBaseUrl.replace(/\/+$/, '')}/webhook/higgsfield-listo/${webhookSecret}/${dateStr}`;
-
   // Pedido explícito de Rodrigo (3/9/2026): que el reel siempre trabaje con
   // una foto (suya u otra) en vez de generarse de la nada. daily-photo.js
   // corre antes (10:40 UTC) y elige la foto del día en photo-history.json —
   // acá se busca esa elección y, si existe, se pide el video a partir de
   // ELLA (image-to-video). Si no hay foto de hoy por lo que sea (todavía no
   // se subió ninguna, daily-photo.js no corrió, falló el link temporal), se
-  // sigue pidiendo el clip de texto como antes — no bloquea nada.
+  // sigue pidiendo el clip de texto como antes — no bloquea nada. La misma
+  // foto se usa para las dos partes cuando dosPartes es true — elegir una
+  // foto distinta por parte queda para una versión futura, ver daily-media.md.
   const todayPhoto = await findTodayPhotoUrl(dropboxToken, dateStr);
 
-  // Mientras la cuenta de API de Higgsfield no tenga créditos/modelo
-  // habilitado (3/9/2026 — plan Plus comprado en la web normal, no en
-  // cloud.higgsfield.ai, que sigue en 0), el pedido automático puede fallar.
-  // Antes, si `submitHiggsfieldClip` tiraba error, TODO se perdía — ni
-  // siquiera el prompt quedaba visible en ningún lado, y Rodrigo no tenía
-  // forma de generar el video a mano con lo que Mentis ya escribió. Ahora el
-  // pedido automático se envuelve en su propio try/catch: si falla, el
-  // prompt se guarda igual (con status "manual — no se pudo pedir
-  // automático") para que aparezca en el panel y Rodrigo pueda copiarlo y
-  // generarlo él mismo en la web de Higgsfield con el plan que ya tiene.
-  let job = null;
-  let submitError = null;
-  try {
-    job = await submitHiggsfieldClip(prompt, webhookUrl, todayPhoto ? todayPhoto.url : null);
-  } catch (err) {
-    submitError = err.message;
+  // Arma la lista de "partes" a pedir: una (el caso normal) o dos (ver nota
+  // sobre dosPartes al principio del archivo). `parte` es `null` en el caso
+  // normal (para no tocar la URL del webhook ni el nombre del archivo final
+  // de los días de siempre) y 1/2 cuando son dos.
+  const parts = todayEntry.dosPartes
+    ? [
+        { parte: 1, escenaVisual: todayEntry.escenaVisualParte1, captionText: todayEntry.captionTextParte1 },
+        { parte: 2, escenaVisual: todayEntry.escenaVisualParte2, captionText: todayEntry.captionTextParte2 },
+      ]
+    : [{ parte: null, escenaVisual: todayEntry.escenaVisual, captionText: todayEntry.captionText }];
+
+  const results = [];
+  for (const part of parts) {
+    const entryForPrompt = { angulo: todayEntry.angulo, escenaVisual: part.escenaVisual, captionText: part.captionText, musicStyle: todayEntry.musicStyle };
+    const prompt = buildVisualPrompt(entryForPrompt);
+    // Prompt aparte, para pegar a mano en la interfaz web de Higgsfield (plan
+    // Plus) — incluye música y captions, que la API no soporta. Ver el
+    // comentario largo junto a buildManualHiggsfieldPrompt.
+    const promptCompleto = buildManualHiggsfieldPrompt(entryForPrompt);
+    const webhookUrl = `${webhookBaseUrl.replace(/\/+$/, '')}/webhook/higgsfield-listo/${webhookSecret}/${dateStr}${part.parte ? `/${part.parte}` : ''}`;
+
+    // Mientras la cuenta de API de Higgsfield no tenga créditos/modelo
+    // habilitado (3/9/2026 — plan Plus comprado en la web normal, no en
+    // cloud.higgsfield.ai, que sigue en 0), el pedido automático puede
+    // fallar. Antes, si `submitHiggsfieldClip` tiraba error, TODO se
+    // perdía — ni siquiera el prompt quedaba visible en ningún lado, y
+    // Rodrigo no tenía forma de generar el video a mano con lo que Mentis ya
+    // escribió. Ahora el pedido automático se envuelve en su propio
+    // try/catch: si falla, el prompt se guarda igual (con status "manual —
+    // no se pudo pedir automático") para que aparezca en el panel y Rodrigo
+    // pueda copiarlo y generarlo él mismo en la web de Higgsfield con el plan
+    // que ya tiene. Esto es por parte: si dosPartes es true y una de las dos
+    // falla, la otra igual se pide y se guarda normalmente.
+    let job = null;
+    let submitError = null;
+    try {
+      job = await submitHiggsfieldClip(prompt, webhookUrl, todayPhoto ? todayPhoto.url : null);
+    } catch (err) {
+      submitError = err.message;
+    }
+
+    results.push({
+      parte: part.parte, prompt, promptCompleto, captionText: part.captionText,
+      requestId: job ? job.request_id : null,
+      status: job ? job.status : `manual — no se pudo pedir automático (${submitError})`,
+      submitError,
+    });
   }
 
   // Pedido explícito de Rodrigo (2/9/2026): "no veo el prompt del video".
@@ -425,17 +466,32 @@ async function runDailyMedia(webhookBaseUrl) {
   // ya se mandó — el video se genera igual, solo no queda registrado el
   // prompt (distinto del catch de arriba, que es sobre el pedido a
   // Higgsfield en sí).
+  //
+  // Forma del historial: los días normales (dosPartes: false) guardan los
+  // mismos campos planos de siempre (prompt/promptCompleto/captionText/
+  // requestId/status), sin ningún cambio — para no romper lo que el panel ya
+  // sabe mostrar. Los días de dos partes agregan, en cambio, un array
+  // `partes` con esos mismos campos por cada parte — ver panel.js para cómo
+  // se distingue uno de otro al mostrarlo.
   try {
     const videoHistory = loadVideoHistory();
-    videoHistory.entries.push({
-      date: dateStr, angulo: todayEntry.angulo, prompt, promptCompleto, duration: CLIP_DURATION_SECONDS,
-      captionText: todayEntry.captionText || null,
+    const entry = {
+      date: dateStr, angulo: todayEntry.angulo, duration: CLIP_DURATION_SECONDS,
       musicStyle: todayEntry.musicStyle || null,
-      requestId: job ? job.request_id : null,
-      status: job ? job.status : `manual — no se pudo pedir automático (${submitError})`,
       photoUsed: todayPhoto ? todayPhoto.file : null,
       submittedAt: new Date().toISOString(),
-    });
+    };
+    if (todayEntry.dosPartes) {
+      entry.partes = results;
+    } else {
+      const r = results[0];
+      entry.prompt = r.prompt;
+      entry.promptCompleto = r.promptCompleto;
+      entry.captionText = r.captionText;
+      entry.requestId = r.requestId;
+      entry.status = r.status;
+    }
+    videoHistory.entries.push(entry);
     saveVideoHistory(videoHistory);
     const dropboxToken2 = await getDropboxAccessToken();
     await dropboxUpload(dropboxToken2, `${CONTENT_FOLDER}/video-history.json`, fs.readFileSync(VIDEO_HISTORY_PATH));
@@ -443,24 +499,25 @@ async function runDailyMedia(webhookBaseUrl) {
     console.error('No se pudo guardar el historial de prompts de video:', err.message);
   }
 
-  if (!job) {
-    return {
-      ok: true, submitted: false, date: dateStr, angulo: todayEntry.angulo, prompt, promptCompleto,
-      photoUsed: todayPhoto ? todayPhoto.file : null,
-      reason: `No se pudo pedir el clip automáticamente a Higgsfield (${submitError}) — el "promptCompleto" de arriba (con música y captions incluidos) ya está guardado y visible en el panel, listo para pegar a mano en la interfaz web de Higgsfield (plan Plus)${todayPhoto ? `, junto con la foto "${todayPhoto.file}" como referencia si querés mantener el mismo resultado` : ''}.`,
-    };
-  }
-
-  return {
-    ok: true, submitted: true, date: dateStr, angulo: todayEntry.angulo, prompt, promptCompleto,
+  const anySubmitted = results.some((r) => r.requestId);
+  const response = {
+    ok: true, submitted: anySubmitted, date: dateStr, angulo: todayEntry.angulo,
+    dosPartes: !!todayEntry.dosPartes,
     photoUsed: todayPhoto ? todayPhoto.file : null,
-    requestId: job.request_id, status: job.status,
+    partes: results.map((r) => ({ parte: r.parte, submitted: !!r.requestId, status: r.status })),
   };
+  if (!anySubmitted) {
+    response.reason = 'No se pudo pedir ninguno de los clips automáticamente a Higgsfield — el/los "promptCompleto" (con música y captions incluidos) ya están guardados y visibles en el panel, listos para pegar a mano en la interfaz web de Higgsfield (plan Plus)' + (todayPhoto ? `, junto con la foto "${todayPhoto.file}" como referencia si querés mantener el mismo resultado.` : '.');
+  }
+  return response;
 }
 
 // Paso 2: llamado desde server.js cuando Higgsfield avisa que el clip
-// terminó (o falló). dateStr viene de la propia URL del webhook.
-async function handleHiggsfieldWebhook(dateStr, payload) {
+// terminó (o falló). dateStr viene de la propia URL del webhook. `parte` es
+// null/undefined en los días de siempre (un solo clip) y "1"/"2" en los días
+// de dos partes — server.js lo lee del segmento extra de la URL cuando
+// existe (ver el comentario sobre dosPartes al principio de este archivo).
+async function handleHiggsfieldWebhook(dateStr, payload, parte) {
   let dropboxToken;
   try {
     dropboxToken = await getDropboxAccessToken();
@@ -469,7 +526,7 @@ async function handleHiggsfieldWebhook(dateStr, payload) {
   }
 
   if (payload.status !== 'completed') {
-    return { ok: true, saved: false, date: dateStr, status: payload.status, error: payload.error || null };
+    return { ok: true, saved: false, date: dateStr, parte: parte || null, status: payload.status, error: payload.error || null };
   }
 
   const videoUrl = payload.payload && payload.payload.video && payload.payload.video.url;
@@ -482,11 +539,11 @@ async function handleHiggsfieldWebhook(dateStr, payload) {
   const buf = Buffer.from(await videoRes.arrayBuffer());
 
   if (!fs.existsSync(CONTENT_DIR)) fs.mkdirSync(CONTENT_DIR, { recursive: true });
-  const fname = `${dateStr}-clip.mp4`;
+  const fname = parte ? `${dateStr}-clip-parte${parte}.mp4` : `${dateStr}-clip.mp4`;
   fs.writeFileSync(path.join(CONTENT_DIR, fname), buf);
   await dropboxUpload(dropboxToken, `${CONTENT_FOLDER}/${fname}`, buf);
 
-  return { ok: true, saved: true, date: dateStr, file: fname };
+  return { ok: true, saved: true, date: dateStr, parte: parte || null, file: fname };
 }
 
 module.exports = { runDailyMedia, handleHiggsfieldWebhook };

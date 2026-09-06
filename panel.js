@@ -99,6 +99,33 @@ async function loadPanelData() {
   return { token, catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels };
 }
 
+// Una tarjeta de prompt de video, para UNA parte (o el clip único de
+// siempre). `parteLabel` es null en el caso normal, y "Parte 1"/"Parte 2"
+// cuando el día se dividió en dos clips — ver la nota sobre dosPartes en
+// daily-media.js (6/9/2026).
+function videoPromptCard(e, part, parteLabel) {
+  return `
+        <div class="promptcard">
+          <div class="promptmeta">${parteLabel ? `<strong>${esc(parteLabel)}</strong> · ` : ''}<span class="dim">${esc(e.date)}</span> · ${esc(e.duration || '')}s · <span class="dim">${esc(part.status || '')}</span>${e.photoUsed ? ` · <span class="dim">foto: ${esc(e.photoUsed)}</span>` : ''}</div>
+          <div class="promptangulo">${esc(e.angulo || '')}</div>
+          <p class="dim mt">Prompt completo — pegar tal cual en la interfaz web de Higgsfield (plan Plus): incluye música y captions.</p>
+          <pre class="promptbox">${esc(part.promptCompleto || part.prompt || '')}</pre>
+          ${part.captionText || e.musicStyle ? `<p class="dim">${part.captionText ? `Caption: "${esc(part.captionText)}"` : ''}${part.captionText && e.musicStyle ? ' · ' : ''}${e.musicStyle ? `Música: ${esc(e.musicStyle)}` : ''}</p>` : ''}
+          <details class="mt"><summary class="dim">Prompt técnico (el que usa el pedido automático a la API, sin música/captions)</summary><pre class="promptbox">${esc(part.prompt || '')}</pre></details>
+        </div>`;
+}
+
+// Un día puede tener un solo clip (forma plana de siempre, entry.partes no
+// existe) o dos (entry.partes = [{parte:1,...}, {parte:2,...}]) — ver
+// daily-media.js. Esto arma una o dos tarjetas según corresponda, sin que el
+// resto del panel tenga que saber la diferencia.
+function videoPromptCards(e) {
+  if (Array.isArray(e.partes) && e.partes.length) {
+    return e.partes.map((p) => videoPromptCard(e, p, `Parte ${p.parte}`)).join('');
+  }
+  return videoPromptCard(e, e, null);
+}
+
 function guideRow(g, secret) {
   const cats = (g.categorias || []).join(' + ');
   const fecha = (g.creadaEn || '').slice(0, 10);
@@ -156,16 +183,8 @@ async function renderPanel(secret) {
       <table><tbody>
         ${recentPhotos.map((e) => `<tr><td class="dim">${esc(e.date)}</td><td>${esc(e.file)}</td><td class="dim">${esc(e.angulo || '')}</td></tr>`).join('') || '<tr><td class="dim">Sin datos todavía.</td></tr>'}
       </tbody></table>
-      <h3 class="mt">Prompt de video del día <span class="count">lo que se le pide a Higgsfield, no solo el resultado</span></h3>
-      ${recentVideoPrompts.length ? recentVideoPrompts.map((e) => `
-        <div class="promptcard">
-          <div class="promptmeta"><span class="dim">${esc(e.date)}</span> · ${esc(e.duration || '')}s · <span class="dim">${esc(e.status || '')}</span>${e.photoUsed ? ` · <span class="dim">foto: ${esc(e.photoUsed)}</span>` : ''}</div>
-          <div class="promptangulo">${esc(e.angulo || '')}</div>
-          <p class="dim mt">Prompt completo — pegar tal cual en la interfaz web de Higgsfield (plan Plus): incluye música y captions.</p>
-          <pre class="promptbox">${esc(e.promptCompleto || e.prompt || '')}</pre>
-          ${e.captionText || e.musicStyle ? `<p class="dim">${e.captionText ? `Caption: "${esc(e.captionText)}"` : ''}${e.captionText && e.musicStyle ? ' · ' : ''}${e.musicStyle ? `Música: ${esc(e.musicStyle)}` : ''}</p>` : ''}
-          <details class="mt"><summary class="dim">Prompt técnico (el que usa el pedido automático a la API, sin música/captions)</summary><pre class="promptbox">${esc(e.prompt || '')}</pre></details>
-        </div>`).join('') : '<p class="dim">Sin datos todavía — se guarda a partir del primer pedido de video después de este cambio.</p>'}
+      <h3 class="mt">Prompt de video del día <span class="count">lo que se le pide a Higgsfield, no solo el resultado — 1 o 2 tarjetas por día, ver "dosPartes"</span></h3>
+      ${recentVideoPrompts.length ? recentVideoPrompts.map((e) => videoPromptCards(e)).join('') : '<p class="dim">Sin datos todavía — se guarda a partir del primer pedido de video después de este cambio.</p>'}
     </section>`;
 
   const statusSection = `
