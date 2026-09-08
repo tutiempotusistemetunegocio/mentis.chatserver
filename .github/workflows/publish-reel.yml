@@ -1,6 +1,11 @@
-  name: Publicar reel en Buffer
+name: Publicar reel en Buffer
 
 on:
+  # No depende de ningún horario fijo — Rodrigo arma el video a mano y lo
+  # sube cuando lo tiene listo (a veces el mismo día, a veces días después).
+  # Por eso el uso normal es disparar esto A MANO ("Run workflow") apenas
+  # subís el reel a la carpeta, en vez de esperar al cron de abajo. El cron
+  # queda solo como red de contención por si te olvidás.
   workflow_dispatch: {}
   schedule:
     - cron: '0 18 * * *'
@@ -11,6 +16,9 @@ jobs:
     steps:
       - name: Llamar al endpoint de publicar el reel listo
         run: |
+          # --max-time más alto que el de la foto (240 en vez de 180): esta
+          # llamada le pide a Buffer que acepte un video, no una foto, y
+          # puede tardar más en validarlo del lado de Buffer.
           HTTP_CODE=$(curl -s -o response.json -w "%{http_code}" --max-time 240 -X POST "${{ secrets.MENTIS_BUFFER_REEL_URL }}" -H "x-buffer-secret: ${{ secrets.MENTIS_BUFFER_SECRET }}")
           curl_exit=$?
           if [ "$curl_exit" -ne 0 ]; then
