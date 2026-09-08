@@ -71,10 +71,33 @@ async function bufferGraphQL(query) {
 
 // Expuesta como GET /internal/buffer-channels — ver el comentario largo de
 // arriba sobre cómo usarla.
+//
+// BUG REAL encontrado por Rodrigo probando esto en vivo (7/9/2026): la
+// primera versión pedía "channels" directo, sin darle a Buffer el
+// organizationId que su propio esquema exige — Buffer devolvía "Field
+// \"channels\" argument \"input\" ... is required, but it was not
+// provided." Corregido pidiendo primero las organizaciones de la cuenta
+// (query aparte, confirmada contra developers.buffer.com) y recién con ese
+// id pidiendo los canales de cada una — la inmensa mayoría de las cuentas
+// (la de Rodrigo incluida) van a tener una sola organización, pero esto
+// funciona igual si hubiera más de una.
 async function getChannels() {
-  const query = 'query GetChannels { channels { id name displayName service } }';
-  const data = await bufferGraphQL(query);
-  return (data.channels || []).map((c) => ({ id: c.id, name: c.name, displayName: c.displayName, service: c.service }));
+  const orgsQuery = 'query GetOrganizations { account { organizations { id name } } }';
+  const orgsData = await bufferGraphQL(orgsQuery);
+  const organizations = (orgsData.account && orgsData.account.organizations) || [];
+  if (organizations.length === 0) {
+    throw new Error('La clave de Buffer no tiene ninguna organización asociada — revisá que la cuenta de Buffer esté completa.');
+  }
+
+  const allChannels = [];
+  for (const org of organizations) {
+    const channelsQuery = `query GetChannels { channels(input: { organizationId: ${JSON.stringify(org.id)} }) { id name displayName service } }`;
+    const data = await bufferGraphQL(channelsQuery);
+    (data.channels || []).forEach((c) => {
+      allChannels.push({ id: c.id, name: c.name, displayName: c.displayName, service: c.service, organization: org.name });
+    });
+  }
+  return allChannels;
 }
 
 async function dropboxDownload(token, dropboxPath) {
