@@ -619,6 +619,74 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Publicar en Instagram vía Buffer (Módulo 03 → buffer-publish.js) — ver
+  // el comentario largo al principio de ese archivo para el porqué de cada
+  // decisión (por qué Buffer y no Metricool, por qué queda como borrador).
+  // Tres rutas relacionadas, cada una con su rol:
+  //  1. GET /internal/buffer-channels — se llama UNA vez a mano para
+  //     encontrar el channelId de Instagram y cargarlo en Render.
+  //  2. POST /internal/publish-photo — la dispara GitHub Actions todos los
+  //     días, después de que corrió daily-photo.js.
+  //  3. GET /internal/photo-proxy/<secreto>/<archivo> — la llama el propio
+  //     servidor de Buffer (no nosotros) para bajar la foto; por eso el
+  //     secreto viaja en la URL, no en un header, mismo truco que ya se usa
+  //     con el webhook de Higgsfield.
+  if (req.method === 'GET' && req.url === '/internal/buffer-channels') {
+    const expected = process.env.BUFFER_SECRET;
+    const got = req.headers['x-buffer-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'BUFFER_SECRET no está configurado — Buffer está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { getChannels } = require('./buffer-publish');
+    getChannels()
+      .then((channels) => sendJSON(res, 200, { ok: true, channels }))
+      .catch((err) => {
+        console.error('Error listando los canales de Buffer:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/internal/publish-photo') {
+    const expected = process.env.BUFFER_SECRET;
+    const got = req.headers['x-buffer-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'BUFFER_SECRET no está configurado — Buffer está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { publishDailyPhoto } = require('./buffer-publish');
+    const baseUrl = `https://${req.headers.host}`;
+    publishDailyPhoto(baseUrl)
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error publicando la foto del día en Buffer:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/internal/photo-proxy/')) {
+    const parts = req.url.split('?')[0].split('/').filter(Boolean);
+    // parts = ['internal', 'photo-proxy', '<secreto>', '<archivo>']
+    const urlSecret = parts[2] || null;
+    const filename = parts[3] ? decodeURIComponent(parts[3]) : null;
+    const expected = process.env.BUFFER_SECRET;
+    if (!expected) return sendJSON(res, 501, { error: 'BUFFER_SECRET no está configurado.' });
+    if (urlSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    if (!filename) return sendJSON(res, 400, { error: 'Falta el nombre del archivo en la URL.' });
+    // eslint-disable-next-line global-require
+    const { getPhotoBytes } = require('./buffer-publish');
+    getPhotoBytes(filename)
+      .then(({ buffer, mediaType }) => {
+        res.writeHead(200, { 'Content-Type': mediaType, 'Content-Length': buffer.length });
+        res.end(buffer);
+      })
+      .catch((err) => {
+        console.error('Error sirviendo la foto para Buffer:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
   // Catálogo de guías (Módulo 02 → weekly-guides.js) — arma hasta
   // GUIDES_PER_RUN_FREE gratis + GUIDES_PER_RUN_PREMIUM premium por corrida,
   // cruzando 2+ categorías de conocimiento. Mismo patrón de secreto que el
