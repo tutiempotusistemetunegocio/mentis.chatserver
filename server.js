@@ -687,6 +687,53 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Publicar el REEL en Instagram vía Buffer — camino separado del de la
+  // foto de arriba (ver el comentario grande al principio de
+  // buffer-publish.js, "CAMINO 2 — REEL", para el porqué: Rodrigo arma el
+  // video a mano, esto solo lo toma de la carpeta y lo sube). Mismas dos
+  // rutas que el camino de la foto, mismo secreto (BUFFER_SECRET):
+  //  1. POST /internal/publish-reel — la dispara GitHub Actions (a mano o
+  //     por cron) después de que Rodrigo subió el reel terminado.
+  //  2. GET /internal/reel-proxy/<secreto>/<archivo> — la llama el propio
+  //     servidor de Buffer para bajar el video; a diferencia de photo-proxy,
+  //     transmite en vivo (streaming) en vez de cargar todo a memoria
+  //     primero (ver el porqué en buffer-publish.js).
+  if (req.method === 'POST' && req.url === '/internal/publish-reel') {
+    const expected = process.env.BUFFER_SECRET;
+    const got = req.headers['x-buffer-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'BUFFER_SECRET no está configurado — Buffer está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { publishDailyReel } = require('./buffer-publish');
+    const baseUrl = `https://${req.headers.host}`;
+    publishDailyReel(baseUrl)
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error publicando el reel del día en Buffer:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.startsWith('/internal/reel-proxy/')) {
+    const parts = req.url.split('?')[0].split('/').filter(Boolean);
+    // parts = ['internal', 'reel-proxy', '<secreto>', '<archivo>']
+    const urlSecret = parts[2] || null;
+    const filename = parts[3] ? decodeURIComponent(parts[3]) : null;
+    const expected = process.env.BUFFER_SECRET;
+    if (!expected) return sendJSON(res, 501, { error: 'BUFFER_SECRET no está configurado.' });
+    if (urlSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    if (!filename) return sendJSON(res, 400, { error: 'Falta el nombre del archivo en la URL.' });
+    // eslint-disable-next-line global-require
+    const { streamReelToResponse } = require('./buffer-publish');
+    streamReelToResponse(filename, res).catch((err) => {
+      console.error('Error transmitiendo el reel para Buffer:', err.message);
+      if (!res.headersSent) sendJSON(res, 500, { ok: false, error: err.message });
+      else res.end();
+    });
+    return;
+  }
+
   // Catálogo de guías (Módulo 02 → weekly-guides.js) — arma hasta
   // GUIDES_PER_RUN_FREE gratis + GUIDES_PER_RUN_PREMIUM premium por corrida,
   // cruzando 2+ categorías de conocimiento. Mismo patrón de secreto que el
