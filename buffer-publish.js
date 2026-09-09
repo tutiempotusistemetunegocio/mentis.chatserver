@@ -71,18 +71,22 @@
 // elegir la miniatura más adelante. Buffer exige, igual que con la foto, una
 // URL pública desde la que bajar el archivo — no acepta los bytes directo.
 //
-// POR QUÉ EL PROXY DEL REEL TRANSMITE EN VIVO (streaming) EN VEZ DE
-// DESCARGAR TODO A MEMORIA PRIMERO, a diferencia de getPhotoBytes(): una
-// foto pesa como mucho unos pocos MB, pero un video puede pesar bastante
-// más — y este mismo proyecto ya se quedó sin memoria una vez en un servidor
-// real con el límite de 512MB del plan gratis de Render (ver la nota en
-// daily-media.js, 3/9/2026). Cargar el video entero a memoria antes de
-// mandarlo arriesgaría el mismo apagón. streamReelToResponse() en cambio va
-// pasando los bytes de Dropbox directo hacia Buffer a medida que llegan, sin
-// juntarlos todos en la memoria del servidor en ningún momento.
+// POR QUÉ EL PROXY DEL REEL BAJA EL ARCHIVO ENTERO A MEMORIA (igual que
+// getPhotoBytes(), no como streaming): la primera versión de esto SÍ
+// transmitía en vivo, para cuidar el límite de 512MB del plan gratis de
+// Render (que este mismo proyecto ya sufrió una vez, ver la nota en
+// daily-media.js, 3/9/2026). Pero se probó tres veces con un reel real y las
+// tres veces el video llegó roto — a Buffer y hasta pidiéndolo directo desde
+// el navegador — mientras que el archivo original siempre reprodujo
+// perfecto en la Mac de Rodrigo (9/9/2026). El problema estaba en el
+// streaming en sí, no en el archivo ni en Buffer. Se volvió al mismo patrón
+// ya probado de las fotos: bajar todo a memoria con dropboxDownload() antes
+// de responder (ver streamReelToResponse() más abajo para el detalle
+// completo). Sigue siendo seguro porque un reel real pesa unos pocos MB, muy
+// lejos de los 512MB — MAX_VIDEO_BYTES protege el caso de que alguien suba,
+// por error, un archivo enorme sin comprimir.
 
 const path = require('path');
-const { Readable } = require('stream');
 const { getDropboxAccessToken } = require('./dropbox-auth');
 
 const MEDIA_FOLDER = process.env.DROPBOX_MEDIA_FOLDER || '/mentis-medios';
@@ -197,13 +201,21 @@ async function dropboxGetMetadata(token, dropboxPath) {
   return data;
 }
 
-async function dropboxDownload(token, dropboxPath) {
+// timeoutMs opcional — por defecto FETCH_TIMEOUT_MS (pensado para archivos
+// chicos como fotos o JSON), pero streamReelToResponse() de abajo le manda
+// VIDEO_FETCH_TIMEOUT_MS, más generoso, porque un video tarda más en bajar.
+async function dropboxDownload(token, dropboxPath, timeoutMs = FETCH_TIMEOUT_MS) {
   const res = await fetch('https://content.dropboxapi.com/2/files/download', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath }) },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} descargando ${dropboxPath}`);
+  // Bajarlo entero con arrayBuffer() (en vez de ir transmitiendo el body a
+  // medida que llega) es justamente lo que evita el bug real que encontramos
+  // el 9/9/2026 al transmitir el video en vivo (ver el comentario largo en
+  // streamReelToResponse, más abajo, con la explicación completa de qué
+  // pasaba y por qué se abandonó ese camino).
   return Buffer.from(await res.arrayBuffer());
 }
 
@@ -451,51 +463,41 @@ async function publishDailyReel(baseUrl) {
 // grande al principio del archivo sobre por qué. La llama el propio
 // servidor de Buffer, no nosotros, por eso el secreto viaja en la URL (ver
 // GET /internal/reel-proxy/<secreto>/<archivo> en server.js).
+// CAMBIO DE FONDO el 9/9/2026: esta función arrancó transmitiendo el video en
+// vivo (streaming, sin juntarlo entero en memoria) para cuidar el límite de
+// 512MB de Render. Se probó tres veces con un reel real y las tres veces
+// Buffer terminó con un video roto o que no cargaba — incluso pidiendo el
+// archivo directo desde el navegador, sin pasar por Buffer, se veía roto.
+// El video original, en la Mac de Rodrigo, siempre reprodujo perfecto — así
+// que el problema estaba en el streaming en sí (reenviar el content-length
+// mal si Dropbox comprimía la respuesta, o algún corte de conexión a mitad
+// de la transmisión que nadie agarraba), no en el archivo.
+//
+// En vez de seguir cazando ese bug a ciegas, se volvió al mismo patrón que
+// ya funciona de punta a punta con las fotos (getPhotoBytes): bajar el
+// archivo ENTERO a memoria con dropboxDownload() (que usa arrayBuffer(), no
+// streaming) y mandarlo de una — así el tamaño que declaramos
+// (buffer.length) es siempre exacto, porque es el mismo buffer que se manda,
+// no un número reenviado de otro lado que puede no coincidir.
+//
+// Por qué esto no reabre el problema de memoria que motivó el streaming en
+// primer lugar: un reel de Instagram real dura segundos, no horas — pesa
+// unos pocos MB, muy lejos de los 512MB del plan gratis de Render. El chequeo
+// de MAX_VIDEO_BYTES de abajo (contra la metadata, ANTES de bajar nada) es
+// la protección para el caso raro de que alguien suba, por error, un archivo
+// gigante sin comprimir en vez de un reel.
 async function streamReelToResponse(filename, res) {
   const ext = path.extname(filename).toLowerCase();
   const mediaType = SUPPORTED_VIDEO_EXT[ext];
   if (!mediaType) throw new Error(`Tipo de archivo no soportado: ${filename}`);
   const dropboxToken = await getDropboxAccessToken();
-  const dropboxRes = await fetch('https://content.dropboxapi.com/2/files/download', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${dropboxToken}`,
-      'Dropbox-API-Arg': JSON.stringify({ path: `${REEL_FOLDER}/${filename}` }),
-      // BUG REAL encontrado el 9/9/2026: sin esto, si Dropbox (o algún proxy
-      // en el medio) comprime la respuesta (Content-Encoding: gzip), el
-      // fetch de Node la descomprime sola antes de dársela a nuestro código,
-      // pero el header "content-length" de abajo sigue siendo el tamaño
-      // COMPRIMIDO, no el real. Reenviábamos ese número mal a Buffer, que
-      // entonces cortaba la descarga antes de terminar — el video quedaba
-      // truncado/corrupto aunque Buffer aceptara el post igual. Pedir
-      // "identity" fuerza a que no haya compresión de por medio, así el
-      // content-length que reenviamos abajo es siempre el real.
-      'Accept-Encoding': 'identity',
-    },
-    signal: AbortSignal.timeout(VIDEO_FETCH_TIMEOUT_MS),
-  });
-  if (!dropboxRes.ok || !dropboxRes.body) throw new Error(`HTTP ${dropboxRes.status} descargando el video ${filename} de Dropbox`);
-
-  const contentLength = dropboxRes.headers.get('content-length');
-  const headers = { 'Content-Type': mediaType };
-  if (contentLength) headers['Content-Length'] = contentLength;
-  res.writeHead(200, headers);
-
-  // Antes, esta función volvía apenas arrancaba el pipe, sin esperar a que
-  // terminara — un error a mitad de la transmisión (ej. un corte de red
-  // entre Dropbox y este servidor) no lo agarraba nadie, y la conexión podía
-  // quedar en un estado raro sin avisar del problema. Ahora se espera a que
-  // el pipe termine de verdad, y si algo falla a mitad de camino, se corta
-  // la conexión con res.destroy() en vez de res.end() — así el que está
-  // descargando (Buffer) se entera de que la transferencia quedó incompleta,
-  // en vez de recibir un archivo cortado disfrazado de "completo".
-  const source = Readable.fromWeb(dropboxRes.body);
-  await new Promise((resolve, reject) => {
-    source.on('error', reject);
-    res.on('error', reject);
-    res.on('finish', resolve);
-    source.pipe(res);
-  });
+  const meta = await dropboxGetMetadata(dropboxToken, `${REEL_FOLDER}/${filename}`);
+  if (meta.size && meta.size > MAX_VIDEO_BYTES) {
+    throw new Error(`"${filename}" pesa más de ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)}MB — no se sirve por seguridad de memoria.`);
+  }
+  const buffer = await dropboxDownload(dropboxToken, `${REEL_FOLDER}/${filename}`, VIDEO_FETCH_TIMEOUT_MS);
+  res.writeHead(200, { 'Content-Type': mediaType, 'Content-Length': String(buffer.length) });
+  res.end(buffer);
 }
 
 // Responde a una petición HEAD sobre el reel (sin bajar el video entero) —

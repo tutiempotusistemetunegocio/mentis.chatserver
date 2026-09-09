@@ -749,12 +749,14 @@ const server = http.createServer((req, res) => {
     }
     streamReelToResponse(filename, res).catch((err) => {
       console.error('Error transmitiendo el reel para Buffer:', err.message);
-      // Antes esto hacía res.end() — cerraba la conexión como si hubiera
-      // terminado bien, aunque el video se hubiera cortado a mitad de
-      // camino. res.destroy() corta la conexión de golpe, sin el cierre
-      // "prolijo" de una respuesta completa, para que el que está bajando
-      // el archivo (Buffer) note que la transferencia quedó incompleta en
-      // vez de darla por buena.
+      // 9/9/2026: streamReelToResponse() ahora baja el video entero antes de
+      // escribir nada (ver el comentario grande sobre ese cambio en
+      // buffer-publish.js), así que casi cualquier error cae en la rama de
+      // abajo (headers todavía no mandados) y devuelve un JSON de error
+      // normal. res.destroy() queda solo como red de contención por si algo
+      // falla ya empezada la respuesta — para que la conexión se corte de
+      // golpe en vez de cerrarse "prolija" con un archivo incompleto
+      // disfrazado de completo.
       if (!res.headersSent) sendJSON(res, 500, { ok: false, error: err.message });
       else res.destroy();
     });
