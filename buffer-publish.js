@@ -92,9 +92,9 @@ const { getDropboxAccessToken } = require('./dropbox-auth');
 const MEDIA_FOLDER = process.env.DROPBOX_MEDIA_FOLDER || '/mentis-medios';
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 // Carpeta donde Rodrigo sube, a mano, el reel ya terminado (armado en
-// Higgsfield o donde sea) — plana, sin subcarpetas, salvo la subcarpeta
-// "publicados" que este mismo módulo crea sola para no volver a tomar un
-// video ya publicado (ver publishDailyReel()).
+// Higgsfield o donde sea) — plana, sin subcarpetas. Los videos ya publicados
+// NO se mueven de acá (ver REEL_HISTORY_PATH en publishDailyReel() para el
+// porqué, 9/9/2026) — quedan anotados en un historial en vez de moverse.
 const REEL_FOLDER = process.env.DROPBOX_REEL_READY_FOLDER || '/mentis-reel-listo';
 const BUFFER_TOKEN = process.env.BUFFER_ACCESS_TOKEN;
 const INSTAGRAM_CHANNEL_ID = process.env.BUFFER_INSTAGRAM_CHANNEL_ID;
@@ -157,9 +157,9 @@ async function getChannels() {
 }
 
 // Mismo patrón que dropboxListFolder en daily-photo.js — carpeta plana, sin
-// recursividad (así la subcarpeta "publicados" aparece como UNA carpeta,
-// nunca lista sus archivos acá adentro, que es justo lo que hace falta para
-// que un video ya movido no se vuelva a tomar).
+// recursividad. publishDailyReel() filtra por extensión de video, así que
+// historial-publicados.json (que vive en esta misma carpeta) queda afuera
+// solo, sin necesidad de ignorarlo a mano.
 async function dropboxListFolder(token, folderPath) {
   const res = await fetch('https://api.dropboxapi.com/2/files/list_folder', {
     method: 'POST',
@@ -176,16 +176,23 @@ async function dropboxListFolder(token, folderPath) {
   return data.entries || [];
 }
 
-async function dropboxMove(token, fromPath, toPath) {
-  const res = await fetch('https://api.dropboxapi.com/2/files/move_v2', {
+// Sube (o sobrescribe) un archivo chico en Dropbox — la usa publishDailyReel
+// para guardar el historial de reels ya publicados (ver el comentario grande
+// ahí abajo, 9/9/2026, sobre por qué existe ese historial).
+async function dropboxUpload(token, dropboxPath, buffer) {
+  const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ from_path: fromPath, to_path: toPath, autorename: true }),
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Dropbox-API-Arg': JSON.stringify({ path: dropboxPath, mode: 'overwrite', mute: true }),
+      'Content-Type': 'application/octet-stream',
+    },
+    body: buffer,
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new Error(data.error_summary || `HTTP ${res.status} moviendo ${fromPath} a ${toPath}`);
+    throw new Error(data.error_summary || `HTTP ${res.status} subiendo ${dropboxPath}`);
   }
 }
 
@@ -367,6 +374,29 @@ async function findScriptForReel(dropboxToken, filename) {
   };
 }
 
+// BUG REAL encontrado por Rodrigo el 9/9/2026, y es la explicación de TODA
+// la confusión con "el video se ve roto" de los intentos anteriores: esta
+// función movía el archivo a REEL_FOLDER/publicados/ apenas Buffer aceptaba
+// el post (createPost exitoso) — pero "aceptar el post" no es lo mismo que
+// "ya terminé de bajar/procesar el video". Buffer sigue pidiendo el video
+// desde nuestra URL (/internal/reel-proxy/...) DESPUÉS de ese momento —
+// para armar el preview en su propia app, y de nuevo al momento real de
+// publicar en Instagram, que puede ser minutos después (con "Next
+// Available" no es inmediato). Como ya habíamos movido el archivo, esos
+// pedidos posteriores chocaban con "path/not_found" — Buffer se quedaba con
+// un video roto/inexistente, aunque el archivo original nunca tuvo nada
+// malo. Rodrigo lo confirmó a mano: moviendo el archivo de vuelta al origen
+// después de publicar, el reel apareció bien en Instagram.
+//
+// La solución: dejar de mover el archivo. En vez de eso, se guarda un
+// historial (REEL_FOLDER/historial-publicados.json) con los nombres ya
+// publicados, y esta función lo consulta para no volver a tomar el mismo
+// video en la corrida de mañana. El archivo se queda en su lugar
+// indefinidamente — Rodrigo puede borrarlo a mano de Dropbox cuando quiera
+// (por ejemplo, una vez que confirmó en Instagram que salió bien), sin
+// apuro, ya que el sistema nunca lo va a volver a publicar solo.
+const REEL_HISTORY_PATH = `${REEL_FOLDER}/historial-publicados.json`;
+
 // Expuesta como POST /internal/publish-reel — ver el comentario grande al
 // principio del archivo (CAMINO 2) para el porqué de este camino entero.
 async function publishDailyReel(baseUrl) {
@@ -381,11 +411,16 @@ async function publishDailyReel(baseUrl) {
     return { ok: false, error: err.message };
   }
 
+  const history = await dropboxDownloadJSON(dropboxToken, REEL_HISTORY_PATH, { entries: [] });
+  const yaPublicados = new Set(history.entries.map((e) => e.file));
+
   const entries = await dropboxListFolder(dropboxToken, REEL_FOLDER);
-  const videoEntries = entries.filter((e) => e['.tag'] === 'file' && SUPPORTED_VIDEO_EXT[path.extname(e.name).toLowerCase()]);
+  const videoEntries = entries.filter(
+    (e) => e['.tag'] === 'file' && SUPPORTED_VIDEO_EXT[path.extname(e.name).toLowerCase()] && !yaPublicados.has(e.name),
+  );
 
   if (videoEntries.length === 0) {
-    return { ok: true, published: false, reason: `No hay ningún video esperando en ${REEL_FOLDER} — subí ahí el reel terminado cuando lo tengas listo (formatos: ${Object.keys(SUPPORTED_VIDEO_EXT).join(', ')}).` };
+    return { ok: true, published: false, reason: `No hay ningún video nuevo esperando en ${REEL_FOLDER} — subí ahí el reel terminado cuando lo tengas listo (formatos: ${Object.keys(SUPPORTED_VIDEO_EXT).join(', ')}).` };
   }
 
   // El más viejo primero (por si Rodrigo sube varios de una — se publican de
@@ -439,16 +474,19 @@ async function publishDailyReel(baseUrl) {
   }
   const bufferPostId = (result && result.post && result.post.id) || null;
 
-  // Se mueve a "publicados" recién DESPUÉS de que Buffer aceptó el post —
+  // Se anota en el historial recién DESPUÉS de que Buffer aceptó el post —
   // así, si algo falla antes (Buffer rechaza el video, se cae la conexión),
-  // el archivo se queda donde estaba y la próxima corrida lo vuelve a
-  // intentar solo, en vez de perderlo de vista.
+  // el archivo no queda anotado y la próxima corrida lo vuelve a intentar
+  // solo, en vez de perderlo de vista. El archivo en sí NO se mueve ni se
+  // borra (ver el comentario grande sobre REEL_HISTORY_PATH más arriba) —
+  // Buffer puede necesitar volver a pedirlo por un rato todavía.
+  history.entries.push({ file: chosen.name, date: dateStr, bufferPostId, publishedAt: new Date().toISOString() });
   try {
-    await dropboxMove(dropboxToken, `${REEL_FOLDER}/${chosen.name}`, `${REEL_FOLDER}/publicados/${chosen.name}`);
+    await dropboxUpload(dropboxToken, REEL_HISTORY_PATH, Buffer.from(JSON.stringify(history, null, 2)));
   } catch (err) {
     return {
       ok: true, published: false, draft: true, date: dateStr, file: chosen.name, text, bufferPostId,
-      warning: `El reel ya se creó como borrador en Buffer, pero no se pudo mover el archivo dentro de Dropbox (${err.message}) — movelo vos a mano a ${REEL_FOLDER}/publicados/ para que no se vuelva a tomar mañana.`,
+      warning: `El reel ya se creó como borrador en Buffer, pero no se pudo guardar el historial (${err.message}) — puede que mañana el sistema intente tomar este mismo video de nuevo. No hace falta que hagas nada; si pasa, avisame.`,
     };
   }
 

@@ -706,9 +706,10 @@ const server = http.createServer((req, res) => {
   //  1. POST /internal/publish-reel — la dispara GitHub Actions (a mano o
   //     por cron) después de que Rodrigo subió el reel terminado.
   //  2. GET /internal/reel-proxy/<secreto>/<archivo> — la llama el propio
-  //     servidor de Buffer para bajar el video; a diferencia de photo-proxy,
-  //     transmite en vivo (streaming) en vez de cargar todo a memoria
-  //     primero (ver el porqué en buffer-publish.js).
+  //     servidor de Buffer para bajar el video, igual que photo-proxy con la
+  //     foto (carga todo a memoria antes de responder — ver el porqué en
+  //     buffer-publish.js, incluido por qué se abandonó la idea de
+  //     transmitirlo en vivo).
   if (req.method === 'POST' && req.url === '/internal/publish-reel') {
     const expected = process.env.BUFFER_SECRET;
     const got = req.headers['x-buffer-secret'];
