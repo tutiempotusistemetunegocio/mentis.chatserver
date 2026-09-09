@@ -965,6 +965,52 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Guía cero, en PDF, sin secreto (9/9/2026) — mismo espíritu que /guia/<id>
+  // de arriba: pensada para un link fijo que se puede pegar directo en un
+  // botón de ManyChat ("Add A Link" del asistente rápido de Quick Automation
+  // no soporta llamar a /internal/manychat-guide dinámicamente, así que esta
+  // es la salida simple mientras se arma el flujo completo con External
+  // Request). La guía cero ya es pública por diseño (es lo que se le manda a
+  // cualquiera que responda al CTA), así que no hace falta protegerla como
+  // al resto del panel.
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '') === '/guia-cero') {
+    // eslint-disable-next-line global-require
+    const { renderGuiaCeroPdf } = require('./panel');
+    renderGuiaCeroPdf()
+      .then((buffer) => {
+        if (buffer === null) { res.writeHead(404); return res.end('La guía cero todavía no tiene PDF.'); }
+        res.writeHead(200, { 'content-type': 'application/pdf' });
+        res.end(buffer);
+      })
+      .catch((err) => {
+        console.error('Error sirviendo la guía cero pública:', err.message);
+        res.writeHead(500); res.end('No se pudo servir la guía cero: ' + err.message);
+      });
+    return;
+  }
+
+  // Guía "del reel" — 9/9/2026, pedido explícito de Rodrigo: "también tienen
+  // que recibir la guía del reel" (además de la guía cero de arriba). Sin
+  // parámetros a propósito: es la misma para cualquiera que comente HOY (la
+  // guía del catálogo que Mentis eligió como mejor combinación con el reel
+  // de hoy — ver guiaDelReelDeHoy() en guide-delivery.js), así que también
+  // funciona como link fijo en el asistente rápido de ManyChat.
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '') === '/guia-del-reel') {
+    // eslint-disable-next-line global-require
+    const { servePublicTodayReelGuidePdf } = require('./guide-delivery');
+    servePublicTodayReelGuidePdf()
+      .then((buffer) => {
+        if (buffer === null) { res.writeHead(404); return res.end('Todavía no hay ninguna guía gratis con PDF para elegir.'); }
+        res.writeHead(200, { 'content-type': 'application/pdf' });
+        res.end(buffer);
+      })
+      .catch((err) => {
+        console.error('Error sirviendo la guía del reel de hoy:', err.message);
+        res.writeHead(500); res.end('No se pudo servir la guía del reel: ' + err.message);
+      });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/chat') {
     if (REQUIRE_ACCESS_CHECK) {
       const email = (req.headers['x-mentis-email'] || '').toString().trim();

@@ -30,8 +30,16 @@
 const { getDropboxAccessToken } = require('./dropbox-auth');
 
 const GUIDES_FOLDER = process.env.DROPBOX_GUIDES_FOLDER || '/mentis-guias';
+const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 const HISTORY_PATH = `${GUIDES_FOLDER}/manychat-history.json`;
+// Qué guía le tocó "hoy" al reel del día — ver guiaDelReelDeHoy() más abajo.
+const REEL_GUIDE_CACHE_PATH = `${GUIDES_FOLDER}/guia-del-reel-hoy.json`;
 const FETCH_TIMEOUT_MS = 20000;
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
+
+function todayUTC() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 async function dropboxDownloadJSON(token, dropboxPath, fallback) {
   try {
@@ -129,4 +137,102 @@ async function servePublicGuidePdf(id) {
   return dropboxDownloadBinary(token, `${GUIDES_FOLDER}/${entry.tipo}/${entry.archivoPdf}`);
 }
 
-module.exports = { pickGuideForSubscriber, servePublicGuidePdf };
+// Le pide a Mentis que elija, entre las guías gratis existentes, la que
+// mejor combina como siguiente paso después de ver el reel de hoy — no
+// necesita ser un match perfecto de tema, solo la más cercana. `null` si no
+// hay ANTHROPIC_API_KEY o si la llamada falla por cualquier motivo (el
+// llamador cae a elegir una al azar en ese caso, nunca deja a alguien sin
+// guía por esto).
+async function pedirleAMentisQueElijaLaGuia(anguloHoy, guionHoy, candidatas) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  const lista = candidatas.map((g) => `- id:"${g.id}" | título: "${g.titulo}" | categorías: ${(g.categorias || []).join(' + ')}`).join('\n');
+  const prompt = `El reel de hoy tiene este ángulo/gancho: "${anguloHoy || ''}"${guionHoy ? `\n\nGuion completo (para más contexto):\n${guionHoy.slice(0, 800)}` : ''}\n\nDe esta lista de guías gratis ya existentes en el catálogo, elegí la que mejor funciona como siguiente paso lógico para alguien que acaba de ver este reel y quiere profundizar — no hace falta un match perfecto de tema, solo la más cercana de las disponibles:\n${lista}\n\nDevolvé SOLO un objeto JSON, sin texto antes ni después, con esta forma exacta: {"id": "<el id elegido, copiado tal cual de la lista de arriba>"}`;
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model: MODEL, max_tokens: 200, messages: [{ role: 'user', content: prompt }] }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    const data = await res.json();
+    if (!res.ok) return null;
+    const raw = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const parsed = JSON.parse(jsonMatch[0]);
+    return parsed.id || null;
+  } catch {
+    return null;
+  }
+}
+
+// "La guía del reel" (9/9/2026, pedido explícito de Rodrigo: "también tienen
+// que recibir la guía del reel" — además de la guía cero, que ya se manda
+// como link fijo desde /guia-cero, ver server.js). A diferencia de
+// pickGuideForSubscriber (arriba, pensada para que cada PERSONA reciba una
+// guía distinta sin repetir, y por eso necesita el flujo completo de
+// ManyChat con External Request), esta es la MISMA para cualquiera que
+// comente HOY — la guía del catálogo que mejor combina con el reel de hoy —
+// así que se puede servir como un link FIJO simple (GET /guia-del-reel, sin
+// parámetros), compatible con el asistente rápido de ManyChat que solo
+// acepta links fijos.
+//
+// Se recalcula UNA vez por día, no en cada pedido: guarda la elección en
+// guia-del-reel-hoy.json (misma carpeta que el catálogo) junto con la fecha,
+// y solo le vuelve a preguntar a Mentis cuál combina mejor cuando cambia el
+// día — evita gastar una llamada a la API de Claude por cada persona que
+// comenta el mismo día.
+async function guiaDelReelDeHoy() {
+  const token = await getDropboxAccessToken();
+  const dateStr = todayUTC();
+
+  const catalog = await dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] });
+  const gratisConPdf = catalog.entries.filter((e) => e.tipo === 'gratis' && e.archivoPdf);
+  if (gratisConPdf.length === 0) {
+    return { ok: false, error: 'Todavía no hay ninguna guía gratis con PDF cargada en el catálogo.' };
+  }
+
+  const cache = await dropboxDownloadJSON(token, REEL_GUIDE_CACHE_PATH, null);
+  if (cache && cache.date === dateStr && cache.guideId) {
+    const cached = gratisConPdf.find((g) => g.id === cache.guideId);
+    if (cached) return { ok: true, id: cached.id, titulo: cached.titulo };
+  }
+
+  // Hay que elegir de nuevo — buscar el reel de hoy (o, si todavía no corrió
+  // el guion diario, el más reciente que haya) en el historial de contenido.
+  const history = await dropboxDownloadJSON(token, `${CONTENT_FOLDER}/content-history.json`, { entries: [] });
+  const reelesRecientes = history.entries.filter((e) => e.tipo === 'reel').slice(-8).reverse();
+  const reelHoy = reelesRecientes.find((e) => e.date === dateStr) || reelesRecientes[0] || null;
+
+  let chosenId = null;
+  if (reelHoy) {
+    chosenId = await pedirleAMentisQueElijaLaGuia(reelHoy.angulo, reelHoy.guion, gratisConPdf);
+  }
+  const chosen = gratisConPdf.find((g) => g.id === chosenId) || gratisConPdf[Math.floor(Math.random() * gratisConPdf.length)];
+
+  try {
+    await dropboxUpload(token, REEL_GUIDE_CACHE_PATH, Buffer.from(JSON.stringify({ date: dateStr, guideId: chosen.id }, null, 2)));
+  } catch (err) {
+    // No perdés la entrega por esto — la guía ya se eligió y se sirve igual;
+    // en el peor caso, si esta escritura falla seguido, se le vuelve a
+    // preguntar a Mentis en cada pedido del mismo día (más gasto de API,
+    // nunca un error para quien comentó).
+    console.error('No se pudo guardar guia-del-reel-hoy.json (la guía se sirve igual):', err.message);
+  }
+
+  return { ok: true, id: chosen.id, titulo: chosen.titulo };
+}
+
+// Sirve directamente el PDF de la guía del reel de hoy — la ruta pública que
+// llama server.js (GET /guia-del-reel, sin secreto, mismo criterio de
+// seguridad que /guia-cero: es contenido gratis pensado para repartirse).
+async function servePublicTodayReelGuidePdf() {
+  const result = await guiaDelReelDeHoy();
+  if (!result.ok) return null;
+  return servePublicGuidePdf(result.id);
+}
+
+module.exports = {
+  pickGuideForSubscriber, servePublicGuidePdf, guiaDelReelDeHoy, servePublicTodayReelGuidePdf,
+};
