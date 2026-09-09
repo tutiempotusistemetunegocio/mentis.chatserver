@@ -1,0 +1,220 @@
+# Copiá este archivo a ".env" y completá los valores reales. Nunca subas el
+# archivo ".env" a un repositorio público — tiene tus claves privadas.
+
+# Clave de la API de Claude (console.anthropic.com -> API Keys). Es distinta
+# de tu cuenta normal de Claude, se paga por uso (por token), y es lo que
+# hace que este servidor pase de "modo demo" a responder de verdad.
+ANTHROPIC_API_KEY=
+
+# Modelo a usar. claude-sonnet-4-5 es un buen punto de partida costo/calidad
+# para este caso de uso.
+ANTHROPIC_MODEL=claude-sonnet-4-5
+
+# --- Dropbox, con renovación automática (recomendado) -----------------------
+# El botón simple "Generate" del App Console de Dropbox da un token que
+# vence a las 4 horas. Con estas tres variables cargadas, el servidor le
+# pide uno nuevo a Dropbox solo, cada vez que hace falta, sin que Rodrigo
+# tenga que volver a generar nada a mano — ver README.md, sección "Conectar
+# Dropbox (con renovación automática)" para la guía paso a paso de cómo
+# conseguir estos tres valores una sola vez.
+DROPBOX_REFRESH_TOKEN=
+DROPBOX_APP_KEY=
+DROPBOX_APP_SECRET=
+
+# Puente de retrocompatibilidad — si las tres variables de arriba no están
+# cargadas todavía, el servidor usa este token directo como antes. Sigue
+# venciendo cada 4 horas, así que es solo para no romper nada mientras se
+# termina de configurar el refresh token. Una vez que las tres de arriba
+# estén cargadas, esta variable ya no hace falta (se puede dejar vacía o
+# borrar).
+DROPBOX_ACCESS_TOKEN=
+
+# Carpeta dentro del App folder de Dropbox donde viven los archivos de
+# conocimiento (reglas.md, redes-sociales.md, etc.) y el manifiesto de la
+# lectura diaria (processed-files.json).
+DROPBOX_KNOWLEDGE_FOLDER=/mentis-reglas
+
+# Carpeta de alimentación (Módulo 01) — dejar vacío significa "la raíz del
+# App folder": una sola carpeta plana donde Rodrigo sube todos los libros
+# juntos, sin subcarpetas por categoría (decisión explícita, ver el plano).
+DROPBOX_FEEDING_FOLDER=
+
+# Secreto propio de la lectura diaria — sin esto configurado, la ruta
+# /internal/daily-ingest queda cerrada por completo, ni siquiera responde.
+# Generá cualquier string largo y random (por ejemplo con
+# `openssl rand -hex 24` en una terminal) y usalo también en el secret de
+# GitHub Actions que dispara esta ruta una vez por día (ver
+# .github/workflows/daily-ingest.yml).
+INGEST_SECRET=
+
+# Cuántos archivos nuevos procesa como máximo una sola corrida de la lectura
+# diaria — para no pasarse de tiempo ni de costo de API en una ejecución. Si
+# hay más archivos nuevos que este número, los que sobran quedan para la
+# corrida del día siguiente.
+INGEST_MAX_FILES_PER_RUN=3
+
+# Carpeta dentro del App folder de Dropbox donde se guardan los guiones
+# generados por el guion diario (Módulo 03) y su historial
+# (content-history.json).
+DROPBOX_CONTENT_FOLDER=/mentis-contenido
+
+# Secreto propio del guion diario — sin esto configurado, la ruta
+# /internal/daily-script queda cerrada por completo, igual que INGEST_SECRET.
+# Generá otro string largo y random, distinto al de INGEST_SECRET, y usalo
+# también en el secret de GitHub Actions que dispara esta ruta
+# (ver .github/workflows/daily-script.yml).
+SCRIPT_SECRET=
+
+# Puerto donde corre el servidor localmente.
+PORT=3000
+
+# --- Acceso (dos sistemas separados, nunca se cruzan) -----------------------
+# En "false" (default) el servidor no exige acceso — sirve para probar en
+# local sin depender de Systeme.io. Poner en "true" antes de mostrárselo a
+# un cliente real.
+REQUIRE_ACCESS_CHECK=false
+
+# Secreto compartido con el webhook de Systeme.io de la oferta premium del
+# chat (Módulo 04/08). Cuando alguien compra, Systeme.io llama a
+# /webhook/systeme-premium con este secreto y el email queda habilitado en
+# access-premium.json.
+SYSTEME_PREMIUM_WEBHOOK_SECRET=
+
+# Secreto compartido con el webhook de Systeme.io de la formación en vivo
+# (Módulo 02 — réplica del panel). Completamente separado del de arriba:
+# habilita access-panel-alumnos.json, nunca access-premium.json.
+SYSTEME_PANEL_WEBHOOK_SECRET=
+
+# Tamaño máximo (en MB) de un archivo que un cliente puede adjuntar en el
+# chat premium (imagen, PDF o texto — ver README.md, sección "Dictado por
+# voz y adjuntar archivos"). Pensado para no arriesgar la memoria de
+# Render (free tier, 512MB) con un archivo enorme, y para no disparar sin
+# querer el costo/tamaño de una llamada a la API de Claude.
+CHAT_FILE_MAX_MB=8
+
+# --- Video diario (Módulo 03 → Higgsfield) -----------------------------------
+# Par de claves generadas en cloud.higgsfield.ai — ver daily-media.md.
+HIGGSFIELD_KEY_ID=
+HIGGSFIELD_KEY_SECRET=
+
+# Secreto propio (inventado por nosotros, no lo da Higgsfield) para el
+# webhook /webhook/higgsfield-listo — Higgsfield no manda headers propios,
+# así que este secreto viaja como segmento de la URL. Generá otro string
+# largo y random, distinto a los demás.
+HIGGSFIELD_WEBHOOK_SECRET=
+
+# Secreto propio de la ruta que dispara el pedido diario de video — sin esto
+# configurado, /internal/daily-media queda cerrada por completo, igual que
+# INGEST_SECRET y SCRIPT_SECRET. Usalo también en el secret de GitHub
+# Actions que dispara esta ruta (ver .github/workflows/daily-media.yml).
+MEDIA_SECRET=
+
+# --- Carpeta de medios (Módulo 03 → daily-photo.js) --------------------------
+# Carpeta dentro del App folder de Dropbox donde Rodrigo sube sus propias
+# fotos, plana (sin subcarpetas) — ver daily-photo.md para los criterios de
+# selección.
+DROPBOX_MEDIA_FOLDER=/mentis-medios
+
+# Secreto propio de la ruta que elige la foto del día — sin esto configurado,
+# /internal/daily-photo queda cerrada por completo, igual que los demás
+# secretos de arriba. Usalo también en el secret de GitHub Actions que
+# dispara esta ruta (ver .github/workflows/daily-photo.yml).
+PHOTO_SECRET=
+
+# Cuántas fotos nuevas describe como máximo una sola corrida — mismo motivo
+# que INGEST_MAX_FILES_PER_RUN (no pasarse de tiempo/costo/memoria por
+# ejecución).
+PHOTO_MAX_NEW_PER_RUN=3
+
+# --- Catálogo de guías (Módulo 02 → weekly-guides.js) ------------------------
+# Carpeta dentro del App folder de Dropbox donde quedan las guías generadas
+# (una subcarpeta /gratis y otra /premium) y el índice guide-catalog.json.
+DROPBOX_GUIDES_FOLDER=/mentis-guias
+
+# Secreto propio de la ruta que arma guías nuevas — sin esto configurado,
+# /internal/weekly-guides queda cerrada por completo, igual que los demás
+# secretos de arriba. Usalo también en el secret de GitHub Actions que
+# dispara esta ruta (ver .github/workflows/weekly-guides.yml).
+GUIDES_SECRET=
+
+# Cuántas guías gratis y premium arma como máximo cada corrida — pedido de
+# Rodrigo: al menos 2 y 2 por semana. Para juntar rápido las primeras 10+10,
+# disparar la corrida a mano varias veces seguidas desde GitHub Actions (en
+# vez de subir estos números).
+GUIDES_PER_RUN_FREE=2
+GUIDES_PER_RUN_PREMIUM=2
+
+# --- Guía cero (Módulo 02 → guia-cero.js) ------------------------------------
+# Pedido explícito de Rodrigo (6/9/2026): la guía de referencia FIJA que
+# explica el sistema completo — se manda siempre junto con la guía del tema
+# puntual del reel cuando alguien responde el CTA. Distinta del catálogo
+# rotativo de arriba: siempre es la MISMA guía (se sobreescribe, nunca se
+# acumula), y se dispara a mano (ver .github/workflows/guia-cero.yml, sin
+# cron) — no tiene sentido rehacerla todas las semanas, solo cuando Rodrigo
+# quiera revisarla o mejorarla. Secreto propio, distinto a GUIDES_SECRET —
+# sin esto configurado, /internal/guia-cero queda cerrada por completo,
+# igual que los demás secretos de arriba. Usalo también en el secret de
+# GitHub Actions que dispara esta ruta.
+GUIA_CERO_SECRET=
+
+# --- Publicar en Instagram (Módulo 03 → buffer-publish.js) ------------------
+# Reemplaza a Metricool en este paso puntual — decisión de Rodrigo (6/9/2026)
+# después de confirmar que Metricool exige su plan Advanced (~$53/mes) para
+# tener API, mientras que Buffer da acceso a la API desde su plan gratis.
+# BUFFER_ACCESS_TOKEN: clave personal generada a mano en Buffer
+# (Configuración → API) — no es OAuth, es una clave simple como las de
+# Higgsfield/Dropbox.
+BUFFER_ACCESS_TOKEN=
+
+# El id del canal de Instagram en Buffer — se consigue llamando UNA vez a
+# GET /internal/buffer-channels (con BUFFER_SECRET de abajo, header
+# x-buffer-secret) y copiando el "id" del canal con service:"instagram".
+BUFFER_INSTAGRAM_CHANNEL_ID=
+
+# Carpeta dentro del App folder de Dropbox donde Rodrigo sube, a mano, el
+# reel YA TERMINADO (armado en Higgsfield o donde sea) — este es el camino
+# real de publicación (ver "CAMINO 2 — REEL" en buffer-publish.js), separado
+# del camino opcional de la foto de arriba. No hace falta crearla a mano ni
+# cargar nada acá si el nombre por defecto sirve.
+DROPBOX_REEL_READY_FOLDER=/mentis-reel-listo
+
+# Secreto propio de las cinco rutas de este módulo (buffer-channels,
+# publish-photo, photo-proxy, publish-reel, reel-proxy) — sin esto
+# configurado, las cinco quedan cerradas, igual que los demás secretos de
+# arriba. Usalo también en el secret de GitHub Actions que disparan
+# publish-photo y publish-reel (ver .github/workflows/publish-photo.yml y
+# publish-reel.yml).
+BUFFER_SECRET=
+
+# --- Modelos de negocio para monetizar (Módulo 08 → business-models.js) -----
+# Secreto propio de la ruta que genera modelos de negocio (ver
+# business-models.md) — negocios que Rodrigo mismo podría montar, no
+# búsqueda de empresas reales en internet (no hay esa herramienta). Sin esto
+# configurado, /internal/business-models queda cerrada por completo, igual
+# que los demás secretos de arriba. Usalo también en el secret de GitHub
+# Actions que dispara esta ruta (ver .github/workflows/business-models.yml).
+BUSINESS_MODELS_SECRET=
+
+# Cuántos modelos de negocio nuevos propone como máximo cada corrida
+# (default 2). Para juntar varias ideas rápido al principio, disparar la
+# corrida a mano varias veces seguidas desde GitHub Actions, en vez de subir
+# este número.
+BUSINESS_MODELS_PER_RUN=2
+
+# --- Herramienta de borrado (Módulo 08 → admin-reset.js) --------------------
+# Secreto propio de la ruta que borra guías + contenido diario + registro de
+# fotos usadas (ver admin-reset.md) — DESTRUCTIVO, por eso tiene su propio
+# secreto y nunca comparte uno de los otros módulos. Sin esto configurado,
+# /internal/admin-reset-content queda cerrada por completo, igual que los
+# demás secretos de arriba. Usalo también en el secret de GitHub Actions que
+# dispara esta ruta (ver .github/workflows/admin-reset-content.yml) — ese
+# workflow además pide escribir "BORRAR" a mano antes de llamar a esta ruta.
+ADMIN_RESET_SECRET=
+
+# --- Panel personal (Módulo 08 → panel.js) -----------------------------------
+# Contraseña propia del panel privado de Rodrigo — a diferencia de los
+# secretos de arriba, este viaja en la URL que abrís en el navegador:
+# https://<tu-servidor>/panel/<PANEL_SECRET>. Generá un string largo y
+# random, distinto a todos los demás secretos, y guardalo vos — quien lo
+# tenga puede ver el catálogo de guías y el contenido generado.
+PANEL_SECRET=
