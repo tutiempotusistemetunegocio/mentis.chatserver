@@ -1,13 +1,10 @@
 # Publicar en Instagram — Módulo 03 → buffer-publish.js
 
-Publica en Instagram, como borrador. Implementado igual que el resto de las tareas: la lógica vive en `buffer-publish.js`, corriendo dentro del mismo servidor (`mentis-chat-server`, Módulo 08).
+Publica el reel del día en Instagram, como borrador. Implementado igual que el resto de las tareas: la lógica vive en `buffer-publish.js`, corriendo dentro del mismo servidor (`mentis-chat-server`, Módulo 08).
 
-**Dos caminos independientes** (agregado 8/9/2026, después de una confusión real con Rodrigo que vale la pena dejar escrita):
+**Un solo camino, el del reel** — este módulo tuvo antes un segundo camino de foto (publicaba automáticamente una foto suelta elegida por `daily-photo.js`), pero Rodrigo pidió sacarlo del todo (9/9/2026: "Toda la foto no es necesario, puedes eliminarlo. No quiero fotos."). Junto con eso se sacó `daily-photo.js`, su documentación y sus dos workflows de GitHub Actions (`daily-photo.yml` y `publish-photo.yml`) — si hace falta alguno de vuelta, está en el historial de git.
 
-- **El REEL (el que importa de verdad)**: mientras Higgsfield siga sin funcionar por API (ver `daily-media.md`), el video no lo arma el sistema — lo arma Rodrigo a mano, usando el ángulo del guion del día como base. Este módulo NO vuelve a elegir nada: solo espera a que Rodrigo suba el reel ya terminado a una carpeta de Dropbox, y lo toma de ahí tal cual. Ver la sección "Camino del reel" más abajo.
-- **La foto (opcional, el original de esta entrega)**: publica la foto que `daily-photo.js` eligió automáticamente de una carpeta de fotos sueltas. Rodrigo no tiene por qué usar este camino — no hace falta subir nada a esa carpeta si no lo querés.
-
-La razón de por qué existían los dos: la primera versión de este módulo asumía que el sistema iba a elegir una foto automáticamente porque Higgsfield (que generaría el video) todavía estaba pausado. Rodrigo aclaró (8/9/2026): "tenemos que hacer el video manualmente... cuando hago el video en Higgsfield, no le veo la ciencia [al paso de elegir foto]" — con razón: si él ya arma el video a mano usando el ángulo del día, pedirle al sistema que ADEMÁS elija una foto por su cuenta no aporta nada. El camino del reel es la corrección de eso.
+Mientras Higgsfield siga sin funcionar por API (ver `daily-media.md`), el video no lo arma el sistema — lo arma Rodrigo a mano, usando el ángulo del guion del día como base. Este módulo NO elige nada: solo espera a que Rodrigo suba el reel ya terminado a una carpeta de Dropbox, y lo toma de ahí tal cual.
 
 ## Por qué Buffer y no Metricool
 
@@ -15,7 +12,7 @@ El plano original (`higgsfield-metricool-preparacion.md`) tenía pensado Metrico
 
 **Limitación honesta que hay que tener presente**: las métricas que expone la API de Buffer para Instagram son reactions (likes), comentarios, compartidos, guardados y nuevos seguidores — no expone "vistas". El plano original pensaba juzgar el "ángulo ganador" con vistas/comentarios/compartidos (ver `nexo-portal`/Módulo 07 en el plano); con Buffer, vistas queda afuera de lo que se puede medir automáticamente. No cambia nada de lo ya construido, pero conviene saberlo antes de diseñar esa parte.
 
-## Camino del reel (el que usa Rodrigo)
+## Cómo funciona, en orden
 
 1. Cada mañana, `daily-script.js` ya genera el ángulo/guion del día (esto no cambia).
 2. Rodrigo arma el video a mano — en la app de Higgsfield o donde sea — usando ese ángulo como base.
@@ -25,48 +22,38 @@ El plano original (`higgsfield-metricool-preparacion.md`) tenía pensado Metrico
 
 **Por qué el archivo NO se mueve ni se borra después de publicarlo** (cambio real, 9/9/2026): la primera versión SÍ lo movía a una subcarpeta `publicados/` apenas Buffer aceptaba el post. Pero Buffer sigue pidiendo el video desde nuestra URL después de ese momento — para armar el preview en su propia app, y de nuevo al publicarlo de verdad en Instagram (que con "Next Available" puede ser minutos después, no inmediato). Como el archivo ya se había movido, esos pedidos posteriores fallaban con "no encontrado", y el reel le llegaba roto a Buffer aunque el video original nunca tuvo nada malo — Rodrigo lo confirmó a mano moviendo el archivo de vuelta al origen, y ahí sí funcionó. Por eso ahora el archivo se queda donde Rodrigo lo subió, indefinidamente; el historial es lo único que evita que se vuelva a publicar solo. Rodrigo puede borrar del todo los videos ya confirmados en Instagram cuando quiera, a mano, sin apuro.
 
-**Cómo se arma el texto del post**: si el archivo se llama con la fecha adelante (ej. `2026-09-08.mp4`), el sistema busca el guion de ESE día exacto en el historial y usa su caption — así el texto corresponde de verdad al video, aunque Rodrigo lo suba días después de haber visto el ángulo. Si el archivo no trae esa fecha, o no hay guion guardado para ese día, se usa el guion "reel" más reciente que haya, y la respuesta trae un aviso (`warning`) explicándolo — como de cualquier forma queda como borrador (ver más abajo), Rodrigo lo revisa en Buffer antes de que salga.
+**Cómo se arma el texto del post**: si el archivo se llama con la fecha adelante (ej. `2026-09-08.mp4`), el sistema busca el guion de ESE día exacto en el historial y usa su caption (`captionText`/`captionTextParte2` + `cta`, los mismos campos que ya escribe `daily-script.js` — no se le pide a Mentis un texto nuevo para esto) — así el texto corresponde de verdad al video, aunque Rodrigo lo suba días después de haber visto el ángulo. Si el archivo no trae esa fecha, o no hay guion guardado para ese día, se usa el guion "reel" más reciente que haya, y la respuesta trae un aviso (`warning`) explicándolo — como de cualquier forma queda como borrador (ver más abajo), Rodrigo lo revisa en Buffer antes de que salga.
 
-**Por qué transmite el video en vivo (streaming) en vez de cargarlo a memoria primero**: una foto pesa unos pocos MB, pero un video puede pesar bastante más — y este mismo proyecto ya se quedó sin memoria una vez en una corrida real con el límite de 512MB del plan gratis de Render (ver `daily-media.js`). `GET /internal/reel-proxy/...` va pasando los bytes de Dropbox directo hacia Buffer a medida que llegan, sin juntarlos enteros en la memoria del servidor en ningún momento.
+**Por qué se baja el video entero a memoria antes de mandarlo, no en vivo (streaming)**: la primera versión SÍ transmitía en vivo, para cuidar el límite de 512MB del plan gratis de Render (que este mismo proyecto ya sufrió una vez, ver `daily-media.js`). Se probó tres veces con un reel real y las tres veces el video llegó roto — a Buffer y hasta pidiéndolo directo desde el navegador — mientras que el archivo original siempre reprodujo perfecto en la Mac de Rodrigo (9/9/2026). El problema estaba en el streaming en sí, no en el archivo. Un reel real pesa unos pocos MB, muy lejos de los 512MB, así que bajarlo entero es seguro — `MAX_VIDEO_BYTES` protege el caso de que alguien suba, por error, un archivo enorme sin comprimir.
 
-## Camino de la foto (opcional)
-
-Publica la **foto** que `daily-photo.js` elige automáticamente entre las que Rodrigo sube a una carpeta plana de fotos sueltas (`DROPBOX_MEDIA_FOLDER`) — pensado originalmente como reemplazo del video mientras Higgsfield no funcionaba por API. Sigue funcionando y sigue siendo útil si algún día Rodrigo quiere publicar una foto suelta sin pasar por todo el proceso del reel, pero no hace falta tocarlo ni subir nada a esa carpeta si no lo va a usar.
-
-**No trae métricas todavía.** Ese es un paso aparte, no construido en esta entrega — quedó documentado como el límite honesto de arriba para cuando se construya.
-
-## Por qué queda como borrador, no publicación automática
-
-Decisión mía, no un pedido puntual de Rodrigo — la explico porque es la única parte del sistema que sale hacia afuera, en vivo, frente a gente real. Un guion o una guía mal generados quedan guardados en Dropbox hasta que alguien los revisa; una foto con un caption raro publicada directo en Instagram ya salió, la vio gente, y no hay forma de deshacerlo del todo. Por eso `publishDailyPhoto()` crea el post en Buffer con `saveToDraft: true` — queda esperando en la app de Buffer (o en su panel web) para que Rodrigo lo revise y lo publique él mismo con un toque. Si con el tiempo esto genera confianza, sacar el `saveToDraft` es un cambio de una línea en `buffer-publish.js`.
-
-## Cómo funciona, en orden
-
-1. Lee `photo-history.json` (que ya generó `daily-photo.js`) y busca la elección de hoy — si no hay ninguna (fin de semana, día de carrusel, o `daily-photo.js` no corrió), no hace nada.
-2. Lee `content-history.json` para armar el texto del post: usa `captionText`/`captionTextParte2` (el gancho, ya escrito en español por Mentis) + `cta` (la invitación a comentar la palabra clave) — son los mismos campos que ya escribe `daily-script.js`, no se le pide a Mentis un texto nuevo para esto.
-3. Arma una URL pública apuntando a la propia foto (`/internal/photo-proxy/<secreto>/<archivo>`) — la API de Buffer exige una URL desde la que descargar la imagen, no acepta que se le manden los bytes directo (confirmado contra la documentación).
-4. Llama a la API de Buffer (mutation `createPost`, con `saveToDraft: true`) apuntando al canal de Instagram configurado.
+**Cómo se le manda el video a Buffer**: `createPost` con el asset como `{ video: { url } }`, apuntando a una URL propia (`/internal/reel-proxy/<secreto>/<archivo>`) — la API de Buffer exige una URL pública desde la que descargar el archivo, no acepta que se le manden los bytes directo (confirmado contra `developers.buffer.com/examples/create-video-post.html`). También exige `metadata.instagram.type` (acá siempre `reel`) y `metadata.instagram.shouldShareToFeed` (en `true`, para que además del feed de Reels aparezca en el feed principal) — ningún ejemplo genérico de la doc lo menciona, hubo que ir al tipo `InstagramPostMetadataInput` para encontrarlo.
 
 ## La API de Buffer es GraphQL, no REST
 
 Un solo endpoint (`https://api.buffer.com`), todo viaja como una mutation/query de texto en el body — confirmado leyendo `developers.buffer.com` directamente, no asumido. La autenticación es una clave personal que se genera a mano en Buffer (Configuración → API), enviada como `Authorization: Bearer <clave>` — mismo patrón simple que ya se usa con Higgsfield/Dropbox.
 
+## Por qué queda como borrador, no publicación automática
+
+Decisión mía, no un pedido puntual de Rodrigo — la explico porque es la única parte del sistema que sale hacia afuera, en vivo, frente a gente real. Un guion o una guía mal generados quedan guardados en Dropbox hasta que alguien los revisa; un reel con un caption raro publicado directo en Instagram ya salió, la vio gente, y no hay forma de deshacerlo del todo. Por eso `publishDailyReel()` crea el post en Buffer con `saveToDraft: true` — queda esperando en la app de Buffer (o en su panel web) para que Rodrigo lo revise y lo publique él mismo con un toque. Si con el tiempo esto genera confianza, sacar el `saveToDraft` es un cambio de una línea en `buffer-publish.js`.
+
 ## Configuración necesaria (una sola vez)
 
 1. **Crear la cuenta gratis en Buffer** y conectar el Instagram — tiene que ser cuenta **Business o Creator**, no personal (si es personal, Buffer solo manda una notificación al celular en vez de poder publicar solo — se cambia desde la app de Instagram, Configuración → cambiar a cuenta profesional). **Confirmado funcionando por Rodrigo (7/9/2026)**, incluyendo un bache real: tener cuenta en Buffer no alcanza, el Instagram hay que conectarlo aparte, DENTRO de la app de Buffer (Channels → Connect Channel → Instagram).
 2. **Generar la clave personal**: Buffer → Configuración → API → crear clave → copiarla a `BUFFER_ACCESS_TOKEN` en Render.
-3. **Cargar `BUFFER_SECRET`** en Render (un string largo y random, distinto a los demás secretos) — protege las cinco rutas de este módulo.
+3. **Cargar `BUFFER_SECRET`** en Render (un string largo y random, distinto a los demás secretos) — protege las tres rutas de este módulo.
 4. **Encontrar el channelId de Instagram**: con `BUFFER_ACCESS_TOKEN` y `BUFFER_SECRET` ya cargados en Render, llamar una vez a `GET /internal/buffer-channels` (header `x-buffer-secret: <BUFFER_SECRET>`) — devuelve la lista de canales conectados; copiar el `id` del que tenga `service: "instagram"` a `BUFFER_INSTAGRAM_CHANNEL_ID` en Render. **Confirmado funcionando (7/9/2026)**.
-5. **GitHub Actions**: tres secrets — `MENTIS_BUFFER_URL` (la URL del servidor + `/internal/publish-photo`, solo si se va a usar el camino opcional de la foto), `MENTIS_BUFFER_REEL_URL` (la URL del servidor + `/internal/publish-reel`, el que de verdad importa) y `MENTIS_BUFFER_SECRET` (el mismo valor que `BUFFER_SECRET` en Render, sirve para los dos).
+5. **GitHub Actions**: dos secrets — `MENTIS_BUFFER_REEL_URL` (la URL del servidor + `/internal/publish-reel`) y `MENTIS_BUFFER_SECRET` (el mismo valor que `BUFFER_SECRET` en Render).
 
 ## Cómo se dispara
 
-- **Reel**: sin horario fijo — se dispara a mano desde Actions ("Run workflow" en "Publicar reel en Buffer") apenas Rodrigo sube el video, más un cron diario a las 18:00 UTC como red de contención por si se olvida de dispararlo a mano.
-- **Foto (opcional)**: automático todos los días a las 10:50 UTC, 10 minutos después de que corre "Foto diaria de Mentis".
+Sin horario fijo — se dispara a mano desde Actions ("Run workflow" en "Publicar reel en Buffer") apenas Rodrigo sube el video, más un cron diario a las 18:00 UTC como red de contención por si se olvida de dispararlo a mano.
+
+## Confirmado funcionando de punta a punta (9/9/2026)
+
+Rodrigo subió un reel de prueba, corrió el workflow, y el reel apareció publicado correctamente en su Instagram — video, audio y caption bien. En el camino se encontraron y corrigieron varios bugs reales (documentados arriba y en los comentarios de `buffer-publish.js`): el campo `metadata.instagram.type` faltante, la corrupción del video al transmitirlo en vivo, y el bug del archivo movido antes de tiempo.
 
 ## Lo que falta (honesto)
 
-- **El camino del reel no está probado todavía contra una corrida real** (mismo caveat de siempre con código nuevo escrito fuera del entorno de despliegue): la sintaxis está verificada, la mutation de video está armada exactamente como muestra el ejemplo oficial de Buffer (`developers.buffer.com/examples/create-video-post.html`), y el streaming se probó que existe en este Node — pero la confirmación real recién va a llegar cuando Rodrigo suba un video de verdad y dispare `publish-reel`.
-- **El camino de la foto sí está confirmado** (Rodrigo probó `buffer-channels` en vivo el 7/9/2026 y funcionó) pero todavía no publicó ninguna foto real — falta subir fotos a `/mentis-medios` para probarlo de punta a punta, si es que lo va a usar.
 - Traer **métricas** de los posts ya publicados (reactions/comentarios/compartidos/guardados/seguidores — sin vistas, ver la limitación de arriba) para empezar a alimentar la lógica de "ángulo ganador" del plano.
 - Sacar el `saveToDraft` para que publique solo, si Rodrigo decide que ya confía en el paso de borrador.
 - El `thumbnailOffset` del reel (qué instante del video usar como miniatura) no se está mandando — Buffer lo confirma como opcional, así que por ahora elige la miniatura sola; si Rodrigo quiere elegirla, es un cambio chico en `publishDailyReel()`.

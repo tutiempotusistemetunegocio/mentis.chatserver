@@ -598,39 +598,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Carpeta de medios (Módulo 03 → daily-photo.js) — elige la foto que
-  // acompaña el reel de hoy. A diferencia de daily-media (Higgsfield), esto
-  // es síncrono: la llamada a Claude visión responde en la misma petición,
-  // no hay webhook. Mismo patrón de secreto que el resto de las rutas
-  // /internal/*.
-  if (req.method === 'POST' && req.url === '/internal/daily-photo') {
-    const expected = process.env.PHOTO_SECRET;
-    const got = req.headers['x-photo-secret'];
-    if (!expected) return sendJSON(res, 501, { error: 'PHOTO_SECRET no está configurado — la carpeta de medios está desactivada hasta que se cargue.' });
-    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
-    // eslint-disable-next-line global-require
-    const { runDailyPhoto } = require('./daily-photo');
-    runDailyPhoto()
-      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
-      .catch((err) => {
-        console.error('Error eligiendo la foto diaria:', err.message);
-        sendJSON(res, 500, { ok: false, error: err.message });
-      });
-    return;
-  }
+  // Módulo 03 → daily-photo.js (elegía la foto del día) sacado del todo el
+  // 9/9/2026, junto con el camino de foto de Buffer — pedido explícito de
+  // Rodrigo: "Toda la foto no es necesario, puedes eliminarlo. No quiero
+  // fotos." Si hace falta de nuevo, está en el historial de git.
 
   // Publicar en Instagram vía Buffer (Módulo 03 → buffer-publish.js) — ver
   // el comentario largo al principio de ese archivo para el porqué de cada
   // decisión (por qué Buffer y no Metricool, por qué queda como borrador).
-  // Tres rutas relacionadas, cada una con su rol:
-  //  1. GET /internal/buffer-channels — se llama UNA vez a mano para
-  //     encontrar el channelId de Instagram y cargarlo en Render.
-  //  2. POST /internal/publish-photo — la dispara GitHub Actions todos los
-  //     días, después de que corrió daily-photo.js.
-  //  3. GET /internal/photo-proxy/<secreto>/<archivo> — la llama el propio
-  //     servidor de Buffer (no nosotros) para bajar la foto; por eso el
-  //     secreto viaja en la URL, no en un header, mismo truco que ya se usa
-  //     con el webhook de Higgsfield.
+  // Este módulo tuvo antes un camino de foto además del de reel (rutas
+  // publish-photo y photo-proxy) — Rodrigo pidió sacarlo del todo (9/9/2026:
+  // "Toda la foto no es necesario, puedes eliminarlo. No quiero fotos."), así
+  // que ahora solo queda GET /internal/buffer-channels (se llama UNA vez a
+  // mano para encontrar el channelId de Instagram y cargarlo en Render) más
+  // las dos rutas del reel, un poco más abajo.
   if (req.method === 'GET' && req.url === '/internal/buffer-channels') {
     const expected = process.env.BUFFER_SECRET;
     const got = req.headers['x-buffer-secret'];
@@ -647,69 +628,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'POST' && req.url === '/internal/publish-photo') {
-    const expected = process.env.BUFFER_SECRET;
-    const got = req.headers['x-buffer-secret'];
-    if (!expected) return sendJSON(res, 501, { error: 'BUFFER_SECRET no está configurado — Buffer está desactivado hasta que se cargue.' });
-    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
-    // eslint-disable-next-line global-require
-    const { publishDailyPhoto } = require('./buffer-publish');
-    const baseUrl = `https://${req.headers.host}`;
-    publishDailyPhoto(baseUrl)
-      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
-      .catch((err) => {
-        console.error('Error publicando la foto del día en Buffer:', err.message);
-        sendJSON(res, 500, { ok: false, error: err.message });
-      });
-    return;
-  }
-
-  if ((req.method === 'GET' || req.method === 'HEAD') && req.url.startsWith('/internal/photo-proxy/')) {
-    const parts = req.url.split('?')[0].split('/').filter(Boolean);
-    // parts = ['internal', 'photo-proxy', '<secreto>', '<archivo>']
-    const urlSecret = parts[2] || null;
-    const filename = parts[3] ? decodeURIComponent(parts[3]) : null;
-    const expected = process.env.BUFFER_SECRET;
-    if (!expected) return sendJSON(res, 501, { error: 'BUFFER_SECRET no está configurado.' });
-    if (urlSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
-    if (!filename) return sendJSON(res, 400, { error: 'Falta el nombre del archivo en la URL.' });
-    // eslint-disable-next-line global-require
-    const { getPhotoBytes, headPhotoResponse } = require('./buffer-publish');
-    // HEAD además de GET — agregado 9/9/2026: ver el comentario largo sobre
-    // esto en headReelResponse() en buffer-publish.js. Buffer capaz revisa
-    // el archivo con un HEAD antes de bajarlo entero, y esta ruta hasta
-    // ahora solo respondía a GET.
-    if (req.method === 'HEAD') {
-      headPhotoResponse(filename, res).catch((err) => {
-        console.error('Error respondiendo HEAD de la foto para Buffer:', err.message);
-        if (!res.headersSent) sendJSON(res, 500, { ok: false, error: err.message });
-      });
-      return;
-    }
-    getPhotoBytes(filename)
-      .then(({ buffer, mediaType }) => {
-        res.writeHead(200, { 'Content-Type': mediaType, 'Content-Length': buffer.length });
-        res.end(buffer);
-      })
-      .catch((err) => {
-        console.error('Error sirviendo la foto para Buffer:', err.message);
-        sendJSON(res, 500, { ok: false, error: err.message });
-      });
-    return;
-  }
-
-  // Publicar el REEL en Instagram vía Buffer — camino separado del de la
-  // foto de arriba (ver el comentario grande al principio de
-  // buffer-publish.js, "CAMINO 2 — REEL", para el porqué: Rodrigo arma el
-  // video a mano, esto solo lo toma de la carpeta y lo sube). Mismas dos
-  // rutas que el camino de la foto, mismo secreto (BUFFER_SECRET):
+  // Publicar el REEL en Instagram vía Buffer (ver el comentario grande al
+  // principio de buffer-publish.js para el porqué: Rodrigo arma el video a
+  // mano, esto solo lo toma de la carpeta y lo sube). Dos rutas, mismo
+  // secreto (BUFFER_SECRET):
   //  1. POST /internal/publish-reel — la dispara GitHub Actions (a mano o
   //     por cron) después de que Rodrigo subió el reel terminado.
   //  2. GET /internal/reel-proxy/<secreto>/<archivo> — la llama el propio
-  //     servidor de Buffer para bajar el video, igual que photo-proxy con la
-  //     foto (carga todo a memoria antes de responder — ver el porqué en
-  //     buffer-publish.js, incluido por qué se abandonó la idea de
-  //     transmitirlo en vivo).
+  //     servidor de Buffer para bajar el video (carga todo a memoria antes
+  //     de responder — ver el porqué en buffer-publish.js, incluido por qué
+  //     se abandonó la idea de transmitirlo en vivo).
   if (req.method === 'POST' && req.url === '/internal/publish-reel') {
     const expected = process.env.BUFFER_SECRET;
     const got = req.headers['x-buffer-secret'];
@@ -987,6 +915,54 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/webhook/systeme-panel')) {
     const urlSecret = req.url.split('?')[0].replace(/\/+$/, '').slice('/webhook/systeme-panel'.length + 1) || null;
     return handleAccessWebhook(req, res, PANEL_ACCESS_FILE, 'SYSTEME_PANEL_WEBHOOK_SECRET', urlSecret);
+  }
+
+  // Entrega de guías gratis vía ManyChat (Módulo 04 → guide-delivery.js,
+  // 9/9/2026). ManyChat llama a esta ruta (comentario con la palabra clave,
+  // o el reenganche de 15 días) pasando el subscriberId como query string;
+  // el secreto viaja como segmento de URL porque el plan free de ManyChat no
+  // siempre permite agregar headers propios en "External Request" (se acepta
+  // también x-manychat-secret por header, para poder probar con curl).
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/internal/manychat-guide/')) {
+    const urlObj = new URL(req.url, `https://${req.headers.host}`);
+    const urlSecret = urlObj.pathname.replace(/\/+$/, '').slice('/internal/manychat-guide/'.length) || null;
+    const expected = process.env.MANYCHAT_SECRET;
+    const headerSecret = req.headers['x-manychat-secret'];
+    if (!expected) return sendJSON(res, 501, { ok: false, error: 'MANYCHAT_SECRET no está configurado.' });
+    if (urlSecret !== expected && headerSecret !== expected) return sendJSON(res, 401, { ok: false, error: 'Secreto inválido.' });
+    const subscriberId = (urlObj.searchParams.get('subscriberId') || '').trim();
+    if (!subscriberId) return sendJSON(res, 400, { ok: false, error: 'Falta subscriberId.' });
+    // eslint-disable-next-line global-require
+    const { pickGuideForSubscriber } = require('./guide-delivery');
+    const baseUrl = `https://${req.headers.host}`;
+    pickGuideForSubscriber(baseUrl, subscriberId)
+      .then((result) => sendJSON(res, result.ok ? 200 : 404, result))
+      .catch((err) => {
+        console.error('Error eligiendo guía para ManyChat:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  // Guía gratis, servida en PDF sin secreto (pensada para viajar en un DM de
+  // Instagram) — ver la nota de seguridad en guide-delivery.js sobre por qué
+  // esta ruta nunca sirve una guía premium.
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/guia/')) {
+    const id = decodeURIComponent(req.url.split('?')[0].replace(/\/+$/, '').slice('/guia/'.length));
+    if (!id) { res.writeHead(404); return res.end('No encontrado'); }
+    // eslint-disable-next-line global-require
+    const { servePublicGuidePdf } = require('./guide-delivery');
+    servePublicGuidePdf(id)
+      .then((buffer) => {
+        if (buffer === null) { res.writeHead(404); return res.end('Guía no encontrada.'); }
+        res.writeHead(200, { 'content-type': 'application/pdf' });
+        res.end(buffer);
+      })
+      .catch((err) => {
+        console.error('Error sirviendo una guía pública:', err.message);
+        res.writeHead(500); res.end('No se pudo servir la guía: ' + err.message);
+      });
+    return;
   }
 
   if (req.method === 'POST' && req.url === '/chat') {

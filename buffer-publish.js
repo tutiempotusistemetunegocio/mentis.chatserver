@@ -5,38 +5,35 @@
 // que Buffer da acceso a la API desde su plan gratis. Corre dentro del mismo
 // mentis-chat-server, mismo patrón que el resto de los módulos.
 //
-// QUÉ HACE HOY: dos caminos independientes, uno de foto y uno de reel — ver
-// más abajo el porqué del segundo, que es el que de verdad importa.
+// QUÉ HACE HOY: un solo camino, publishDailyReel() (agregado 8/9/2026). Este
+// módulo tuvo antes un segundo camino de foto (publishDailyPhoto), que
+// publicaba una foto suelta elegida automáticamente por daily-photo.js —
+// Rodrigo pidió sacarlo del todo (9/9/2026: "Toda la foto no es necesario,
+// puedes eliminarlo. No quiero fotos.") porque no lo usaba. Si en algún
+// momento hace falta de nuevo, está en el historial de git.
 //
-// CAMINO 1 — FOTO (publishDailyPhoto, el original): publica como borrador la
-// foto que daily-photo.js eligió para el ángulo del día, entre las fotos
-// sueltas que Rodrigo sube a /mentis-medios. Queda como camino OPCIONAL —
-// Rodrigo no tiene por qué usarlo ni subir nada a esa carpeta.
-//
-// CAMINO 2 — REEL (publishDailyReel, agregado 8/9/2026): el que refleja cómo
-// Rodrigo trabaja de verdad. Rodrigo me lo explicó así (8/9/2026): "tenemos
-// que hacer el video manualmente, porque Higgsfield no está funcionando
-// automáticamente con el API... cuando hago el video en Higgsfield, no le
-// veo la ciencia [al paso de elegir foto]". Dicho de otra forma: mientras la
-// integración automática con Higgsfield siga bloqueada (ver daily-media.js),
-// el video no lo arma el sistema — lo arma Rodrigo a mano en la app de
-// Higgsfield, usando el ángulo/guion del día como base. Pedirle al sistema
-// que ADEMÁS elija una foto por su cuenta no tiene sentido: el video que
-// Rodrigo ya hizo ES la elección. Por eso publishDailyReel() no elige nada
-// — solo espera a que Rodrigo suba el reel terminado a una carpeta
-// (DROPBOX_REEL_READY_FOLDER, por defecto /mentis-reel-listo) y lo toma de
-// ahí tal cual. El día que Higgsfield esté confirmado funcionando por API,
-// este es el camino al que se conectaría directo (en vez de esperar que
-// Rodrigo suba el archivo a mano).
+// El camino del reel refleja cómo Rodrigo trabaja de verdad. Rodrigo me lo
+// explicó así (8/9/2026): "tenemos que hacer el video manualmente, porque
+// Higgsfield no está funcionando automáticamente con el API... cuando hago
+// el video en Higgsfield, no le veo la ciencia [al paso de elegir foto]".
+// Dicho de otra forma: mientras la integración automática con Higgsfield
+// siga bloqueada (ver daily-media.js), el video no lo arma el sistema — lo
+// arma Rodrigo a mano en la app de Higgsfield, usando el ángulo/guion del
+// día como base. Por eso publishDailyReel() no elige nada — solo espera a
+// que Rodrigo suba el reel terminado a una carpeta (DROPBOX_REEL_READY_FOLDER,
+// por defecto /mentis-reel-listo) y lo toma de ahí tal cual. El día que
+// Higgsfield esté confirmado funcionando por API, este es el camino al que
+// se conectaría directo (en vez de esperar que Rodrigo suba el archivo a
+// mano).
 //
 // POR QUÉ QUEDA COMO BORRADOR, NO PUBLICACIÓN AUTOMÁTICA (decisión mía,
 // explicada acá porque Rodrigo no la pidió puntualmente): a diferencia de
 // generar un guion o una guía — que se guardan en Dropbox y Rodrigo los
 // revisa cuando quiere —, publicar en Instagram es la única acción de todo
 // el sistema que sale hacia afuera, en vivo, frente a gente real. Un error
-// acá (una imagen que no cargó bien, un caption raro, un día sin ángulo
-// claro) es mucho más visible y más difícil de deshacer que un archivo mal
-// generado. Por eso publishDailyPhoto() crea el post con `saveToDraft: true`
+// acá (un video que no cargó bien, un caption raro, un día sin ángulo claro)
+// es mucho más visible y más difícil de deshacer que un archivo mal
+// generado. Por eso publishDailyReel() crea el post con `saveToDraft: true`
 // — queda esperando en la app de Buffer para que Rodrigo lo revise y lo
 // publique él mismo con un toque, en vez de salir solo. Si con el tiempo
 // esto genera confianza, sacar el saveToDraft es un cambio de una línea acá
@@ -71,25 +68,23 @@
 // elegir la miniatura más adelante. Buffer exige, igual que con la foto, una
 // URL pública desde la que bajar el archivo — no acepta los bytes directo.
 //
-// POR QUÉ EL PROXY DEL REEL BAJA EL ARCHIVO ENTERO A MEMORIA (igual que
-// getPhotoBytes(), no como streaming): la primera versión de esto SÍ
-// transmitía en vivo, para cuidar el límite de 512MB del plan gratis de
-// Render (que este mismo proyecto ya sufrió una vez, ver la nota en
-// daily-media.js, 3/9/2026). Pero se probó tres veces con un reel real y las
-// tres veces el video llegó roto — a Buffer y hasta pidiéndolo directo desde
-// el navegador — mientras que el archivo original siempre reprodujo
-// perfecto en la Mac de Rodrigo (9/9/2026). El problema estaba en el
-// streaming en sí, no en el archivo ni en Buffer. Se volvió al mismo patrón
-// ya probado de las fotos: bajar todo a memoria con dropboxDownload() antes
-// de responder (ver streamReelToResponse() más abajo para el detalle
-// completo). Sigue siendo seguro porque un reel real pesa unos pocos MB, muy
-// lejos de los 512MB — MAX_VIDEO_BYTES protege el caso de que alguien suba,
-// por error, un archivo enorme sin comprimir.
+// POR QUÉ EL PROXY DEL REEL BAJA EL ARCHIVO ENTERO A MEMORIA, NO COMO
+// STREAMING: la primera versión de esto SÍ transmitía en vivo, para cuidar
+// el límite de 512MB del plan gratis de Render (que este mismo proyecto ya
+// sufrió una vez, ver la nota en daily-media.js, 3/9/2026). Pero se probó
+// tres veces con un reel real y las tres veces el video llegó roto — a
+// Buffer y hasta pidiéndolo directo desde el navegador — mientras que el
+// archivo original siempre reprodujo perfecto en la Mac de Rodrigo
+// (9/9/2026). El problema estaba en el streaming en sí, no en el archivo ni
+// en Buffer: se volvió a bajar todo a memoria con dropboxDownload() antes de
+// responder (ver streamReelToResponse() más abajo para el detalle completo).
+// Sigue siendo seguro porque un reel real pesa unos pocos MB, muy lejos de
+// los 512MB — MAX_VIDEO_BYTES protege el caso de que alguien suba, por
+// error, un archivo enorme sin comprimir.
 
 const path = require('path');
 const { getDropboxAccessToken } = require('./dropbox-auth');
 
-const MEDIA_FOLDER = process.env.DROPBOX_MEDIA_FOLDER || '/mentis-medios';
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 // Carpeta donde Rodrigo sube, a mano, el reel ya terminado (armado en
 // Higgsfield o donde sea) — plana, sin subcarpetas. Los videos ya publicados
@@ -108,7 +103,6 @@ const VIDEO_FETCH_TIMEOUT_MS = 240000;
 // intentar servir, por error, un archivo gigante que no era un reel.
 const MAX_VIDEO_BYTES = 250 * 1024 * 1024;
 
-const SUPPORTED_EXT = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' };
 const SUPPORTED_VIDEO_EXT = { '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm' };
 
 async function bufferGraphQL(query) {
@@ -235,36 +229,6 @@ async function dropboxDownloadJSON(token, dropboxPath, fallback) {
   }
 }
 
-// Descarga los bytes reales de una foto de la carpeta de medios — la usa la
-// ruta GET /internal/photo-proxy/<secreto>/<archivo> en server.js, para
-// darle a Buffer una URL pública desde la que bajar la imagen (la API de
-// Buffer exige una URL, no acepta los bytes subidos directamente — confirmado
-// contra la doc). El secreto va en la propia URL (mismo truco que el webhook
-// de Higgsfield) porque quien la llama es el servidor de Buffer, no nosotros
-// — no puede mandar headers propios.
-async function getPhotoBytes(filename) {
-  const ext = path.extname(filename).toLowerCase();
-  const mediaType = SUPPORTED_EXT[ext];
-  if (!mediaType) throw new Error(`Tipo de archivo no soportado: ${filename}`);
-  const dropboxToken = await getDropboxAccessToken();
-  const buffer = await dropboxDownload(dropboxToken, `${MEDIA_FOLDER}/${filename}`);
-  return { buffer, mediaType };
-}
-
-// Responde a una petición HEAD sobre la foto (sin bajar el archivo entero) —
-// agregado 9/9/2026 al mismo tiempo que el de abajo para el reel, ver ese
-// comentario para el porqué (Buffer probablemente revisa el archivo con HEAD
-// antes de bajarlo entero, y hasta ahora esta ruta solo sabía responder GET).
-async function headPhotoResponse(filename, res) {
-  const ext = path.extname(filename).toLowerCase();
-  const mediaType = SUPPORTED_EXT[ext];
-  if (!mediaType) throw new Error(`Tipo de archivo no soportado: ${filename}`);
-  const dropboxToken = await getDropboxAccessToken();
-  const meta = await dropboxGetMetadata(dropboxToken, `${MEDIA_FOLDER}/${filename}`);
-  res.writeHead(200, { 'Content-Type': mediaType, 'Content-Length': String(meta.size || 0) });
-  res.end();
-}
-
 // Arma el texto del post (el caption real de Instagram — lo que se lee
 // DEBAJO del post — no el texto quemado en pantalla del video, que
 // daily-script.js guarda aparte como captionText/captionTextParte2. Se
@@ -275,69 +239,6 @@ function buildPostText(entry) {
   const gancho = entry.captionTextParte2 || entry.captionText || entry.angulo || '';
   const partes = [gancho, entry.cta].filter(Boolean);
   return partes.join('\n\n');
-}
-
-async function publishDailyPhoto(baseUrl) {
-  if (!BUFFER_TOKEN) return { ok: false, error: 'Falta BUFFER_ACCESS_TOKEN en las variables de entorno.' };
-  if (!INSTAGRAM_CHANNEL_ID) return { ok: false, error: 'Falta BUFFER_INSTAGRAM_CHANNEL_ID — llamá primero a GET /internal/buffer-channels para encontrarlo.' };
-  if (!BUFFER_SECRET) return { ok: false, error: 'Falta BUFFER_SECRET — hace falta para armar la URL pública de la foto que Buffer va a descargar.' };
-
-  let dropboxToken;
-  try {
-    dropboxToken = await getDropboxAccessToken();
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-
-  // La elección de hoy ya la hizo daily-photo.js — acá solo se lee, nunca se
-  // vuelve a elegir nada.
-  const history = await dropboxDownloadJSON(dropboxToken, `${MEDIA_FOLDER}/photo-history.json`, { entries: [] });
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const todayChoice = (history.entries || []).slice().reverse().find((e) => e.date === dateStr);
-  if (!todayChoice || !todayChoice.file) {
-    return { ok: true, published: false, reason: 'Hoy no hay ninguna foto elegida por daily-photo.js todavía (fin de semana, carrusel, o no corrió) — nada que publicar.' };
-  }
-
-  const contentHistory = await dropboxDownloadJSON(dropboxToken, `${CONTENT_FOLDER}/content-history.json`, { entries: [] });
-  const todayEntry = (contentHistory.entries || []).find((e) => e.date === dateStr && e.tipo === 'reel');
-  const text = todayEntry ? buildPostText(todayEntry) : (todayChoice.angulo || 'Nuevo contenido.');
-
-  const photoUrl = `${baseUrl.replace(/\/+$/, '')}/internal/photo-proxy/${BUFFER_SECRET}/${encodeURIComponent(todayChoice.file)}`;
-
-  // Mutation armada como un solo string con los valores ya escapados vía
-  // JSON.stringify (en vez de "variables" de GraphQL con un tipo de entrada
-  // que no está confirmado en la doc) — mismo patrón literal que muestran
-  // los ejemplos oficiales de developers.buffer.com.
-  //
-  // Mismo campo obligatorio que se encontró probando el camino del reel
-  // (7/9/2026, ver el comentario largo en publishDailyReel) — Buffer exige
-  // metadata.instagram.type para cualquier post de Instagram, no solo para
-  // video. Acá siempre "post" (una foto normal de feed, no story ni reel).
-  const mutation = `mutation CreateDraftPost {
-    createPost(input: {
-      text: ${JSON.stringify(text)},
-      channelId: ${JSON.stringify(INSTAGRAM_CHANNEL_ID)},
-      schedulingType: automatic,
-      mode: addToQueue,
-      saveToDraft: true,
-      assets: [{ image: { url: ${JSON.stringify(photoUrl)} } }],
-      metadata: { instagram: { type: post, shouldShareToFeed: true } }
-    }) {
-      ... on PostActionSuccess { post { id text } }
-      ... on MutationError { message }
-    }
-  }`;
-
-  const data = await bufferGraphQL(mutation);
-  const result = data.createPost;
-  if (result && result.message) {
-    return { ok: false, error: `Buffer rechazó el post: ${result.message}` };
-  }
-
-  return {
-    ok: true, published: false, draft: true, date: dateStr,
-    file: todayChoice.file, text, bufferPostId: (result && result.post && result.post.id) || null,
-  };
 }
 
 // Busca, entre las fechas AAAA-MM-DD al principio del nombre del archivo
@@ -511,10 +412,9 @@ async function publishDailyReel(baseUrl) {
 // mal si Dropbox comprimía la respuesta, o algún corte de conexión a mitad
 // de la transmisión que nadie agarraba), no en el archivo.
 //
-// En vez de seguir cazando ese bug a ciegas, se volvió al mismo patrón que
-// ya funciona de punta a punta con las fotos (getPhotoBytes): bajar el
-// archivo ENTERO a memoria con dropboxDownload() (que usa arrayBuffer(), no
-// streaming) y mandarlo de una — así el tamaño que declaramos
+// En vez de seguir cazando ese bug a ciegas, se bajó el archivo ENTERO a
+// memoria con dropboxDownload() (que usa arrayBuffer(), no streaming) y se
+// mandó de una — así el tamaño que declaramos
 // (buffer.length) es siempre exacto, porque es el mismo buffer que se manda,
 // no un número reenviado de otro lado que puede no coincidir.
 //
@@ -559,6 +459,5 @@ async function headReelResponse(filename, res) {
 }
 
 module.exports = {
-  getChannels, publishDailyPhoto, buildPostText, getPhotoBytes, headPhotoResponse,
-  publishDailyReel, streamReelToResponse, headReelResponse,
+  getChannels, buildPostText, publishDailyReel, streamReelToResponse, headReelResponse,
 };
