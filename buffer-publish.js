@@ -461,6 +461,16 @@ async function streamReelToResponse(filename, res) {
     headers: {
       Authorization: `Bearer ${dropboxToken}`,
       'Dropbox-API-Arg': JSON.stringify({ path: `${REEL_FOLDER}/${filename}` }),
+      // BUG REAL encontrado el 9/9/2026: sin esto, si Dropbox (o algún proxy
+      // en el medio) comprime la respuesta (Content-Encoding: gzip), el
+      // fetch de Node la descomprime sola antes de dársela a nuestro código,
+      // pero el header "content-length" de abajo sigue siendo el tamaño
+      // COMPRIMIDO, no el real. Reenviábamos ese número mal a Buffer, que
+      // entonces cortaba la descarga antes de terminar — el video quedaba
+      // truncado/corrupto aunque Buffer aceptara el post igual. Pedir
+      // "identity" fuerza a que no haya compresión de por medio, así el
+      // content-length que reenviamos abajo es siempre el real.
+      'Accept-Encoding': 'identity',
     },
     signal: AbortSignal.timeout(VIDEO_FETCH_TIMEOUT_MS),
   });
@@ -470,7 +480,22 @@ async function streamReelToResponse(filename, res) {
   const headers = { 'Content-Type': mediaType };
   if (contentLength) headers['Content-Length'] = contentLength;
   res.writeHead(200, headers);
-  Readable.fromWeb(dropboxRes.body).pipe(res);
+
+  // Antes, esta función volvía apenas arrancaba el pipe, sin esperar a que
+  // terminara — un error a mitad de la transmisión (ej. un corte de red
+  // entre Dropbox y este servidor) no lo agarraba nadie, y la conexión podía
+  // quedar en un estado raro sin avisar del problema. Ahora se espera a que
+  // el pipe termine de verdad, y si algo falla a mitad de camino, se corta
+  // la conexión con res.destroy() en vez de res.end() — así el que está
+  // descargando (Buffer) se entera de que la transferencia quedó incompleta,
+  // en vez de recibir un archivo cortado disfrazado de "completo".
+  const source = Readable.fromWeb(dropboxRes.body);
+  await new Promise((resolve, reject) => {
+    source.on('error', reject);
+    res.on('error', reject);
+    res.on('finish', resolve);
+    source.pipe(res);
+  });
 }
 
 // Responde a una petición HEAD sobre el reel (sin bajar el video entero) —

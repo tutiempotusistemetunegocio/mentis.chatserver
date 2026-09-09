@@ -749,8 +749,14 @@ const server = http.createServer((req, res) => {
     }
     streamReelToResponse(filename, res).catch((err) => {
       console.error('Error transmitiendo el reel para Buffer:', err.message);
+      // Antes esto hacía res.end() — cerraba la conexión como si hubiera
+      // terminado bien, aunque el video se hubiera cortado a mitad de
+      // camino. res.destroy() corta la conexión de golpe, sin el cierre
+      // "prolijo" de una respuesta completa, para que el que está bajando
+      // el archivo (Buffer) note que la transferencia quedó incompleta en
+      // vez de darla por buena.
       if (!res.headersSent) sendJSON(res, 500, { ok: false, error: err.message });
-      else res.end();
+      else res.destroy();
     });
     return;
   }
