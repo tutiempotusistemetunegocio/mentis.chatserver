@@ -664,7 +664,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && req.url.startsWith('/internal/photo-proxy/')) {
+  if ((req.method === 'GET' || req.method === 'HEAD') && req.url.startsWith('/internal/photo-proxy/')) {
     const parts = req.url.split('?')[0].split('/').filter(Boolean);
     // parts = ['internal', 'photo-proxy', '<secreto>', '<archivo>']
     const urlSecret = parts[2] || null;
@@ -674,7 +674,18 @@ const server = http.createServer((req, res) => {
     if (urlSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
     if (!filename) return sendJSON(res, 400, { error: 'Falta el nombre del archivo en la URL.' });
     // eslint-disable-next-line global-require
-    const { getPhotoBytes } = require('./buffer-publish');
+    const { getPhotoBytes, headPhotoResponse } = require('./buffer-publish');
+    // HEAD además de GET — agregado 9/9/2026: ver el comentario largo sobre
+    // esto en headReelResponse() en buffer-publish.js. Buffer capaz revisa
+    // el archivo con un HEAD antes de bajarlo entero, y esta ruta hasta
+    // ahora solo respondía a GET.
+    if (req.method === 'HEAD') {
+      headPhotoResponse(filename, res).catch((err) => {
+        console.error('Error respondiendo HEAD de la foto para Buffer:', err.message);
+        if (!res.headersSent) sendJSON(res, 500, { ok: false, error: err.message });
+      });
+      return;
+    }
     getPhotoBytes(filename)
       .then(({ buffer, mediaType }) => {
         res.writeHead(200, { 'Content-Type': mediaType, 'Content-Length': buffer.length });
@@ -715,7 +726,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && req.url.startsWith('/internal/reel-proxy/')) {
+  if ((req.method === 'GET' || req.method === 'HEAD') && req.url.startsWith('/internal/reel-proxy/')) {
     const parts = req.url.split('?')[0].split('/').filter(Boolean);
     // parts = ['internal', 'reel-proxy', '<secreto>', '<archivo>']
     const urlSecret = parts[2] || null;
@@ -725,7 +736,17 @@ const server = http.createServer((req, res) => {
     if (urlSecret !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
     if (!filename) return sendJSON(res, 400, { error: 'Falta el nombre del archivo en la URL.' });
     // eslint-disable-next-line global-require
-    const { streamReelToResponse } = require('./buffer-publish');
+    const { streamReelToResponse, headReelResponse } = require('./buffer-publish');
+    // HEAD además de GET — ver headReelResponse() en buffer-publish.js para
+    // el porqué (9/9/2026, después de que Buffer rechazara el primer reel de
+    // prueba con "Video could not be read from its URL").
+    if (req.method === 'HEAD') {
+      headReelResponse(filename, res).catch((err) => {
+        console.error('Error respondiendo HEAD del reel para Buffer:', err.message);
+        if (!res.headersSent) sendJSON(res, 500, { ok: false, error: err.message });
+      });
+      return;
+    }
     streamReelToResponse(filename, res).catch((err) => {
       console.error('Error transmitiendo el reel para Buffer:', err.message);
       if (!res.headersSent) sendJSON(res, 500, { ok: false, error: err.message });
