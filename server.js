@@ -1011,6 +1011,84 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Página combinada con las dos guías (9/9/2026). Por qué existe: Rodrigo
+  // confirmó probando en vivo que el asistente rápido de ManyChat ("Quick
+  // Automation") solo deja pegar UN link fijo en "a DM with a link" — ni
+  // creando la automatización de cero ni clickeando "Edit" después aparece
+  // un editor con lugar para un segundo mensaje/link ("en edit, es la misma
+  // cosa. No aparece nada"). Esta ruta resuelve eso del lado del servidor en
+  // vez de seguir buscando un botón que no está: es UNA sola URL —entra en
+  // el único campo de link que ManyChat sí tiene— que muestra los links a
+  // las DOS guías (cero + la del reel de hoy) para que la persona toque las
+  // que quiera. Solución: en la automatización que ya funciona, cambiar el
+  // link pegado ahí de /guia-cero a /guias-de-hoy.
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '') === '/guias-de-hoy') {
+    // eslint-disable-next-line global-require
+    const { renderGuiasDeHoyHtml } = require('./guide-delivery');
+    const baseUrl = `https://${req.headers.host}`;
+    renderGuiasDeHoyHtml(baseUrl)
+      .then((html) => {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.end(html);
+      })
+      .catch((err) => {
+        console.error('Error armando la página de guías de hoy:', err.message);
+        res.writeHead(500); res.end('No se pudo armar la página: ' + err.message);
+      });
+    return;
+  }
+
+  // Guías premium dentro del chat (9/9/2026) — pedido explícito de Rodrigo:
+  // "gente tiene que tener acceso a las guías premium... cuando tiene acceso
+  // al chat, también tiene que tener automáticamente acceso a las guías
+  // premium... ponelo dentro del propio chat, guías, y ya". Mismo chequeo de
+  // acceso que POST /chat de abajo (mismo header x-mentis-email, mismo
+  // REQUIRE_ACCESS_CHECK) — a propósito: es el MISMO acceso premium, no uno
+  // nuevo que haya que configurar aparte. A diferencia de /guia/<id>
+  // (pública, solo gratis), estas dos rutas sirven CUALQUIER guía del
+  // catálogo porque quien pide ya pasó el control de acceso.
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '') === '/chat/guias') {
+    if (REQUIRE_ACCESS_CHECK) {
+      const email = (req.headers['x-mentis-email'] || '').toString().trim();
+      if (!hasAccess(PREMIUM_ACCESS_FILE, email)) {
+        return sendJSON(res, 401, { error: 'Este chat es para clientes premium. Verificá el email con el que compraste el acceso.' });
+      }
+    }
+    // eslint-disable-next-line global-require
+    const { listAllGuidesForPremiumChat } = require('./guide-delivery');
+    listAllGuidesForPremiumChat()
+      .then((guias) => sendJSON(res, 200, { ok: true, guias }))
+      .catch((err) => {
+        console.error('Error armando la lista de guías del chat premium:', err.message);
+        sendJSON(res, 500, { error: 'No se pudo cargar la lista de guías: ' + err.message });
+      });
+    return;
+  }
+
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/chat/guia/')) {
+    if (REQUIRE_ACCESS_CHECK) {
+      const email = (req.headers['x-mentis-email'] || '').toString().trim();
+      if (!hasAccess(PREMIUM_ACCESS_FILE, email)) {
+        return sendJSON(res, 401, { error: 'Este chat es para clientes premium. Verificá el email con el que compraste el acceso.' });
+      }
+    }
+    const id = decodeURIComponent(req.url.split('?')[0].replace(/\/+$/, '').slice('/chat/guia/'.length));
+    if (!id) { res.writeHead(404); return res.end('No encontrado'); }
+    // eslint-disable-next-line global-require
+    const { serveGuidePdfForPremiumChat } = require('./guide-delivery');
+    serveGuidePdfForPremiumChat(id)
+      .then((buffer) => {
+        if (buffer === null) { res.writeHead(404); return res.end('Guía no encontrada.'); }
+        res.writeHead(200, { 'content-type': 'application/pdf' });
+        res.end(buffer);
+      })
+      .catch((err) => {
+        console.error('Error sirviendo una guía del chat premium:', err.message);
+        res.writeHead(500); res.end('No se pudo servir la guía: ' + err.message);
+      });
+    return;
+  }
+
   if (req.method === 'POST' && req.url === '/chat') {
     if (REQUIRE_ACCESS_CHECK) {
       const email = (req.headers['x-mentis-email'] || '').toString().trim();

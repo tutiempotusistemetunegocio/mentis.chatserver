@@ -233,6 +233,99 @@ async function servePublicTodayReelGuidePdf() {
   return servePublicGuidePdf(result.id);
 }
 
+// Página combinada de las dos guías (9/9/2026). Contexto: Rodrigo confirmó
+// en vivo que el asistente rápido de ManyChat ("Quick Automation") solo deja
+// pegar UN link fijo en el mensaje final — ni al crearlo ni clickeando
+// "Edit" después aparece un editor más completo (su reporte textual: "en
+// edit, es la misma cosa. No aparece nada"). En vez de seguir buscando un
+// rincón de ManyChat que acepte un segundo link, esta página da vuelta el
+// problema: es UNA sola URL —la que sí entra en el único campo de link que
+// ManyChat ofrece— que muestra los DOS links (guía cero + guía del reel de
+// hoy) para que la persona toque los que quiera. Rodrigo solo tiene que
+// cambiar, en la automatización que ya tiene funcionando, el link pegado en
+// "a DM with a link" de "https://.../guia-cero" a
+// "https://.../guias-de-hoy" — mismo campo, mismo botón, un solo click para
+// editarlo, nada nuevo que buscar en la interfaz de ManyChat.
+async function renderGuiasDeHoyHtml(baseUrl) {
+  const base = baseUrl.replace(/\/+$/, '');
+  let tituloReel = 'La guía de hoy';
+  try {
+    const info = await guiaDelReelDeHoy();
+    if (info.ok && info.titulo) tituloReel = info.titulo;
+  } catch {
+    // Si falla (Dropbox lento, catálogo vacío, etc.) se muestra un título
+    // genérico — el link de abajo sigue funcionando igual, nunca se rompe
+    // la página entera por esto.
+  }
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+  return `<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tus guías de Mentis</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px 20px; background:#0f1115; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .card { max-width:420px; width:100%; }
+  h1 { color:#fff; font-size:22px; margin:0 0 8px; }
+  p.sub { color:#9aa3af; font-size:15px; margin:0 0 28px; line-height:1.4; }
+  a.btn { display:block; text-decoration:none; background:#fff; color:#0f1115; border-radius:14px; padding:18px 20px; margin-bottom:14px; font-weight:600; font-size:16px; }
+  a.btn span.tag { display:block; font-weight:400; font-size:13px; color:#6b7280; margin-top:4px; }
+  a.btn.alt { background:#7c5cff; color:#fff; }
+  a.btn.alt span.tag { color:#e4ddff; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>¡Acá tenés tus guías! 🎁</h1>
+    <p class="sub">Son gratis — descargá las dos.</p>
+    <a class="btn" href="${base}/guia-cero">📘 Guía Cero<span class="tag">El sistema completo, paso a paso</span></a>
+    <a class="btn alt" href="${base}/guia-del-reel">🎯 ${esc(tituloReel)}<span class="tag">La guía del reel de hoy</span></a>
+  </div>
+</body>
+</html>`;
+}
+
+// Guías dentro del chat premium (9/9/2026, pedido explícito de Rodrigo:
+// "gente tiene que tener acceso a las guías premium... cuando tiene acceso
+// al chat, también tiene que tener automáticamente acceso a las guías
+// premium... ponelo dentro del propio chat, guías, y ya"). A diferencia de
+// servePublicGuidePdf (arriba, SOLO gratis — viaja sin protección por DM),
+// acá quien pide ya pasó el mismo chequeo de acceso premium que protege
+// POST /chat (mismo email, ver server.js), así que puede ver y leer
+// CUALQUIER guía del catálogo, gratis o premium — no hace falta un acceso
+// separado ni que Rodrigo configure nada aparte.
+async function listAllGuidesForPremiumChat() {
+  const token = await getDropboxAccessToken();
+  const catalog = await dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] });
+  return catalog.entries
+    .filter((e) => e.archivoPdf)
+    .map((e) => ({
+      id: e.id, titulo: e.titulo, tipo: e.tipo, categorias: e.categorias || [],
+    }))
+    // Los ids empiezan con la fecha (ver weekly-guides.js) — orden
+    // descendente simple deja las guías más nuevas primero, sin depender de
+    // un campo de fecha aparte.
+    .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+}
+
+async function serveGuidePdfForPremiumChat(id) {
+  const token = await getDropboxAccessToken();
+  const catalog = await dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] });
+  const entry = catalog.entries.find((e) => e.id === id);
+  if (!entry || !entry.archivoPdf) return null;
+  return dropboxDownloadBinary(token, `${GUIDES_FOLDER}/${entry.tipo}/${entry.archivoPdf}`);
+}
+
 module.exports = {
-  pickGuideForSubscriber, servePublicGuidePdf, guiaDelReelDeHoy, servePublicTodayReelGuidePdf,
+  pickGuideForSubscriber,
+  servePublicGuidePdf,
+  guiaDelReelDeHoy,
+  servePublicTodayReelGuidePdf,
+  renderGuiasDeHoyHtml,
+  listAllGuidesForPremiumChat,
+  serveGuidePdfForPremiumChat,
 };
