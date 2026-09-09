@@ -122,7 +122,7 @@ function videoPromptCard(e, part, parteLabel) {
         <div class="promptcard">
           <div class="promptmeta">${parteLabel ? `<strong>${esc(parteLabel)}</strong> · ` : ''}<span class="dim">${esc(e.date)}</span> · ${esc(e.duration || '')}s · <span class="dim">${esc(part.status || '')}</span>${e.photoUsed ? ` · <span class="dim">foto: ${esc(e.photoUsed)}</span>` : ''}</div>
           <div class="promptangulo">${esc(e.angulo || '')}</div>
-          <p class="dim mt">Prompt completo — pegar tal cual en la interfaz web de Higgsfield (plan Plus): incluye música y captions.</p>
+          <p class="dim mt">Prompt completo — pegar tal cual en el modo "AI Director" de Higgsfield (Cinema Studio, plan Plus): incluye música, captions y dirección de cámara técnica, pensado para 15s con tu cara real (Soul ID).</p>
           <pre class="promptbox">${esc(part.promptCompleto || part.prompt || '')}</pre>
           ${part.captionText || e.musicStyle ? `<p class="dim">${part.captionText ? `Caption: "${esc(part.captionText)}"` : ''}${part.captionText && e.musicStyle ? ' · ' : ''}${e.musicStyle ? `Música: ${esc(e.musicStyle)}` : ''}</p>` : ''}
           <details class="mt"><summary class="dim">Prompt técnico (el que usa el pedido automático a la API, sin música/captions)</summary><pre class="promptbox">${esc(part.prompt || '')}</pre></details>

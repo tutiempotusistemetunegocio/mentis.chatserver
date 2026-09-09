@@ -271,17 +271,54 @@ function buildVisualPrompt(entry) {
 // Por eso `buildVisualPrompt` de arriba se sigue usando tal cual para el
 // pedido automático, y este solo se guarda para mostrarse en el panel.
 //
-// Honesto: no hay forma de confirmar desde acá si la interfaz de Higgsfield
-// realmente interpreta instrucciones de música/captions escritas así dentro
-// del prompt (la documentación pública que se pudo revisar es la de la API,
-// que no cubre la interfaz web de consumo) — la forma de confirmarlo es que
-// Rodrigo lo pruebe una vez y cuente qué pasó, mismo criterio que se usó
-// para todo lo demás en este proyecto.
+// Reescrito (9/9/2026, pedido explícito de Rodrigo — mensaje textual: "sera
+// utilizado em higfield la version ia director, quiero ese promp tecnico,
+// detallado lo maximo posible y los reel con 15 segundos y utilizando
+// siempre mi cara real... los campitos deben ser legibles y bastante
+// destacados"). Cuatro cambios puntuales sobre la versión anterior:
+//  1. Apunta al modo "AI Director" de Higgsfield (Cinema Studio 3.5 — la
+//     propia doc de Higgsfield lo describe como la función que "toma un
+//     concepto y lo desglosa en tomas individuales"), no a un pedido de
+//     video genérico — se lo dice explícito, con vocabulario de dirección
+//     (tipo de toma, movimiento de cámara, iluminación motivada) en vez de
+//     una sola palabra suelta como "cinematic".
+//  2. Target 15 segundos, no 12 — el techo de 12s es de la API de Seedance
+//     (ver CLIP_DURATION_SECONDS y buildVisualPrompt arriba, que NO cambian:
+//     ese límite sigue siendo real para el pedido automático). El modo AI
+//     Director de la interfaz web no tiene ese techo, así que este prompt sí
+//     puede pedir 15s.
+//  3. Instrucción explícita de usar la cara real de Rodrigo (Soul ID / foto
+//     de referencia propia de Higgsfield) — antes esto no se pedía en
+//     ningún lado del prompt.
+//  4. El texto en pantalla ahora lleva instrucción tipográfica explícita
+//     (legible y destacado: alto contraste, tipografía gruesa, márgenes de
+//     seguridad) — antes solo se pedía "que aparezca el texto tal cual",
+//     sin decir cómo tenía que verse.
+//
+// Sigue siendo honesto que no hay forma de confirmar desde acá si Higgsfield
+// interpreta esto tal cual se lo escribe (no hay documentación pública de la
+// interfaz web/AI Director, solo de la API) — la confirmación real es que
+// Rodrigo lo pruebe y cuente qué pasó.
 function buildManualHiggsfieldPrompt(entry) {
-  const base = buildVisualPrompt(entry).replace(/ Silent footage, no dialogue, no voiceover, no on-screen text, no logos, no watermarks\.$/, '');
-  const caption = entry.captionText ? `\n\nAdd on-screen text/captions displaying exactly: "${entry.captionText}"` : '';
-  const music = entry.musicStyle ? `\n\nBackground music: ${entry.musicStyle}.` : '';
-  return `${base} No dialogue, no voiceover, no logos, no watermarks.${caption}${music}`;
+  const escena = entry.escenaVisual || `Visual hook for the theme: "${entry.angulo}".`;
+  const caption = entry.captionText
+    ? `ON-SCREEN TEXT (exact copy, must appear — make it legible and prominent: bold sans-serif, high-contrast (white text with a dark outline or drop shadow), centered in the lower third, large enough to read comfortably on a phone screen, safe margins from all edges): "${entry.captionText}"`
+    : 'ON-SCREEN TEXT: none provided — do not invent one.';
+  const music = entry.musicStyle ? `Background music: ${entry.musicStyle}.` : 'Background music: choose something that fits the tone of the scene.';
+
+  return `AI DIRECTOR PROMPT — Higgsfield Cinema Studio, vertical reel (9:16), target length 15 seconds, silent (no dialogue or voiceover — only on-screen text and music).
+
+CONCEPT: ${escena}
+
+CHARACTER: feature Rodrigo's real face throughout the clip — use his Soul ID / reference photo in Higgsfield so the person on camera is actually him, never a generic AI-generated face.
+
+DIRECTION (break into shots as needed, AI Director style): cinematic, high-production-value social reel — deliberate camera movement per shot (slow push-in, tracking, handheld with purpose, or a considered static frame — pick what serves the moment, never movement for its own sake), dramatic motivated lighting (natural or practical light sources, not flat), shallow depth of field, realistic and professional, intentional color grading. Structure the 15 seconds with a clear arc: an immediate visual hook in the first 2-3 seconds that stops the scroll, the concept above developing through the middle, closing on a beat that lands together with the on-screen CTA text.
+
+${caption}
+
+${music}
+
+Never: no logos, no watermarks, no dialogue, no voiceover, no generic stock-footage look.`;
 }
 
 function loadVideoHistory() {
