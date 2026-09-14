@@ -60,6 +60,23 @@ const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 const MAX_FILES_PER_RUN = parseInt(process.env.INGEST_MAX_FILES_PER_RUN || '3', 10);
 const MAX_CHARS_PER_DOC = 60000; // tope por documento, para acotar tiempo y costo por corrida
 
+// Agregado 14/9/2026 tras encontrar en los logs de Render varios "Ran out of
+// memory (used over 512MB)" reales (no eran por servidor dormido — el
+// servidor arrancaba bien y se caía DESPUÉS, procesando un archivo). Causa:
+// antes de esto, un libro de CUALQUIER tamaño se bajaba entero a memoria
+// (dropboxDownload) y se le pasaba entero a pdf-parse/mammoth — un PDF con
+// muchas imágenes o escaneado puede inflar varias veces su tamaño en RAM al
+// parsearse, mucho más que un PDF de puro texto del mismo tamaño en disco.
+// No hay forma de saber de antemano cuánta RAM va a usar un archivo sin
+// abrirlo, así que en vez de adivinar un número "seguro" por tipo de
+// contenido, se pone un techo conservador sobre el tamaño en disco (lo único
+// que Dropbox informa sin descargar el archivo) — 15 MB por default, ajustable
+// por variable de entorno si Rodrigo sube la memoria del servicio en Render.
+// Un archivo que se salta acá queda marcado en el manifiesto (no se reintenta
+// cada corrida) pero NUNCA se borra de Dropbox ni se pierde — sigue ahí,
+// visible, para procesarlo a mano o subir el límite el día que haga falta.
+const MAX_FILE_SIZE_BYTES = parseInt(process.env.INGEST_MAX_FILE_SIZE_BYTES || String(15 * 1024 * 1024), 10);
+
 // Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
 // 2/9/2026): sin esto, una llamada colgada a Dropbox o a Claude dejaba la
 // corrida esperando sin límite en vez de fallar limpio. Clasificar un
@@ -382,8 +399,24 @@ async function runDailyIngest() {
   const categoriesUpdated = new Set();
   const learnedThisRun = {}; // { "archivo.md": ["- principio nuevo", ...] } — ver reviewStrategy() más abajo
 
+  const skippedTooLarge = [];
+
   for (const entry of candidates.slice(0, MAX_FILES_PER_RUN)) {
     try {
+      // Chequeo de tamaño ANTES de descargar/parsear — ver comentario de
+      // MAX_FILE_SIZE_BYTES arriba. entry.size viene directo del listado de
+      // Dropbox, sin costo de descargar nada.
+      if (typeof entry.size === 'number' && entry.size > MAX_FILE_SIZE_BYTES) {
+        const mb = (entry.size / (1024 * 1024)).toFixed(1);
+        const maxMb = (MAX_FILE_SIZE_BYTES / (1024 * 1024)).toFixed(0);
+        manifest.processed[entry.path_lower] = {
+          name: entry.name, content_hash: entry.content_hash,
+          processedAt: new Date().toISOString(), categories: [],
+          note: `saltado: ${mb} MB supera el límite de ${maxMb} MB (riesgo de quedarse sin memoria al procesarlo)`,
+        };
+        skippedTooLarge.push({ name: entry.name, sizeMb: mb });
+        continue;
+      }
       const buffer = await dropboxDownload(dropboxToken, entry.path_lower);
       const text = await extractText(entry.name, buffer);
       if (!text || !text.trim()) {
@@ -472,6 +505,7 @@ async function runDailyIngest() {
         error: `El conocimiento nuevo se generó pero no se pudo subir completo a Dropbox (${(pushResult.failed || []).map((f) => f.name).join(', ') || pushResult.error || 'error desconocido'}) — a propósito NO se guardó el manifiesto, para que la próxima corrida reintente estos mismos archivos en vez de darlos por procesados sin que el conocimiento haya llegado a la fuente de verdad.`,
         processed: processedNow,
         failed,
+        skippedTooLarge,
         categoriesUpdated: Array.from(categoriesUpdated),
         strategyReview,
       };
@@ -485,9 +519,23 @@ async function runDailyIngest() {
         error: `El conocimiento nuevo sí se subió bien a Dropbox, pero no se pudo actualizar el manifiesto (${err.message}) — la próxima corrida puede reprocesar estos mismos archivos (no duplica conocimiento, la deduplicación ya existente lo evita, solo repite el análisis) hasta que el manifiesto se actualice bien.`,
         processed: processedNow,
         failed,
+        skippedTooLarge,
         categoriesUpdated: Array.from(categoriesUpdated),
         strategyReview,
       };
+    }
+  } else if (skippedTooLarge.length > 0) {
+    // No hubo conocimiento nuevo (todo lo candidato esta corrida era
+    // demasiado grande), pero igual conviene guardar el manifiesto con las
+    // notas de "saltado" — así una corrida futura no vuelve a evaluar el
+    // mismo archivo desde cero en el log (aunque el chequeo en sí es barato,
+    // no descarga nada).
+    try {
+      saveManifest(manifest);
+      await dropboxUpload(dropboxToken, `${KNOWLEDGE_FOLDER}/processed-files.json`, fs.readFileSync(MANIFEST_PATH));
+    } catch {
+      // Si esto falla no es grave — el chequeo de tamaño se repite la
+      // próxima corrida, sin costo real (no descarga ni procesa nada).
     }
   }
   if (opportunitySaved) {
@@ -498,9 +546,10 @@ async function runDailyIngest() {
     ok: true,
     processed: processedNow,
     failed,
+    skippedTooLarge,
     categoriesUpdated: Array.from(categoriesUpdated),
     strategyReview,
-    pendingAfterThisRun: Math.max(candidates.length - processedNow.length - failed.length, 0),
+    pendingAfterThisRun: Math.max(candidates.length - processedNow.length - failed.length - skippedTooLarge.length, 0),
   };
 }
 
