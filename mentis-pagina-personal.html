@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Rodrigo — Mentis</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  :root{
+    --bg:#090c10;
+    --bg-deep:#050709;
+    --panel:#10151c;
+    --panel-line:rgba(238,243,247,0.08);
+    --ink:#eef3f7;
+    --ink-dim:#a3b2bf;
+    --ink-faint:#5f6f7c;
+    --teal:#4fd8c4;
+    --teal-dim:rgba(79,216,196,0.14);
+    --amber:#f2a65a;
+    --amber-dim:rgba(242,166,90,0.14);
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+    line-height:1.5;
+  }
+  h1,h2,h3{
+    font-family:'Instrument Sans', sans-serif;
+    font-weight:600;
+    margin:0;
+    text-wrap:balance;
+  }
+  a{ color:inherit; }
+  .mono{
+    font-family:'IBM Plex Mono', ui-monospace, monospace;
+  }
+  .wrap{
+    max-width:760px;
+    margin:0 auto;
+    padding:0 24px;
+  }
+
+  /* ---------- NAV ---------- */
+  nav{
+    position:sticky; top:0; z-index:20;
+    background:rgba(9,12,16,0.82);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--panel-line);
+  }
+  nav .wrap{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:16px 24px;
+  }
+  .wordmark{
+    display:flex; align-items:center; gap:9px;
+    font-family:'Instrument Sans', sans-serif;
+    font-weight:600; font-size:16px; letter-spacing:0.01em;
+  }
+  .wordmark .dot{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--teal);
+    box-shadow:0 0 0 4px var(--teal-dim);
+  }
+  nav .cta{
+    font-size:12.5px;
+    font-family:'IBM Plex Mono', monospace;
+    letter-spacing:0.03em;
+    padding:8px 14px;
+    border:1px solid var(--panel-line);
+    border-radius:999px;
+    color:var(--ink-dim);
+    text-decoration:none;
+    transition:border-color 0.2s, color 0.2s;
+  }
+  nav .cta:hover{ border-color:var(--teal); color:var(--ink); }
+
+  /* ---------- HERO ---------- */
+  .hero{
+    position:relative;
+    padding:96px 0 84px;
+    overflow:hidden;
+    border-bottom:1px solid var(--panel-line);
+  }
+  .hero-bg{
+    position:absolute; inset:0;
+    background:
+      radial-gradient(560px 320px at 82% -8%, rgba(79,216,196,0.16), transparent 65%),
+      radial-gradient(480px 280px at 8% 8%, rgba(242,166,90,0.10), transparent 70%);
+    pointer-events:none;
+  }
+  .hero-content{ position:relative; }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:12px; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--teal);
+    margin-bottom:22px;
+  }
+  .eyebrow .bar{
+    width:22px; height:1px; background:var(--teal);
+  }
+  h1.hero-title{
+    font-size:clamp(34px, 5.4vw, 54px);
+    line-height:1.06;
+    letter-spacing:-0.015em;
+    max-width:15ch;
+  }
+  h1.hero-title em{
+    font-style:normal;
+    color:var(--teal);
+  }
+  .hero-sub{
+    margin-top:22px;
+    font-size:16.5px;
+    line-height:1.65;
+    color:var(--ink-dim);
+    max-width:52ch;
+  }
+  .hero-ctas{
+    display:flex; flex-wrap:wrap; gap:12px;
+    margin-top:34px;
+  }
+  .btn{
+    font-family:'IBM Plex Sans', sans-serif;
+    font-weight:600;
+    font-size:14.5px;
+    padding:13px 22px;
+    border-radius:9px;
+    text-decoration:none;
+    display:inline-flex; align-items:center; gap:8px;
+    transition:transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .btn:hover{ transform:translateY(-1px); }
+  .btn-primary{
+    background:var(--teal);
+    color:#04211c;
+    box-shadow:0 8px 24px -8px rgba(79,216,196,0.55);
+  }
+  .btn-ghost{
+    background:transparent;
+    border:1px solid var(--panel-line);
+    color:var(--ink);
+  }
+  .btn-ghost:hover{ border-color:var(--amber); }
+
+  /* signal line decoration */
+  .signal{
+    margin-top:56px;
+    height:52px;
+    display:flex; align-items:center;
+  }
+  .signal svg{ width:100%; height:100%; display:block; }
+  .signal-path{
+    fill:none;
+    stroke:var(--teal);
+    stroke-width:1.4;
+    stroke-linecap:round;
+    opacity:0.65;
+    stroke-dasharray:6 420;
+    animation:pulse 5.5s linear infinite;
+  }
+  @keyframes pulse{
+    0%{ stroke-dashoffset:0; }
+    100%{ stroke-dashoffset:-426; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .signal-path{ animation:none; }
+  }
+
+  /* ---------- SECTIONS ---------- */
+  section.block{
+    padding:76px 0;
+    border-bottom:1px solid var(--panel-line);
+  }
+  .kicker{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--amber);
+    margin-bottom:16px;
+  }
+  h2.block-title{
+    font-size:clamp(24px, 3.6vw, 32px);
+    max-width:18ch;
+    margin-bottom:20px;
+  }
+  p.lead{
+    font-size:15.5px;
+    line-height:1.75;
+    color:var(--ink-dim);
+    max-width:58ch;
+    margin:0 0 16px;
+  }
+  p.lead strong{ color:var(--ink); font-weight:600; }
+  p.lead:last-child{ margin-bottom:0; }
+
+  /* motivation cards */
+  .mgrid{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:14px;
+    margin-top:32px;
+  }
+  .mcard{
+    background:var(--panel);
+    border:1px solid var(--panel-line);
+    border-radius:12px;
+    padding:20px;
+  }
+  .mcard .num{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    color:var(--teal);
+    letter-spacing:0.08em;
+    margin-bottom:10px;
+  }
+  .mcard h3{
+    font-size:15.5px;
+    margin-bottom:7px;
+  }
+  .mcard p{
+    font-size:13.3px;
+    line-height:1.6;
+    color:var(--ink-dim);
+    margin:0;
+  }
+
+  /* how it works — vague on purpose */
+  .steps{
+    margin-top:32px;
+    display:flex;
+    flex-direction:column;
+  }
+  .step{
+    display:grid;
+    grid-template-columns:56px 1fr;
+    gap:18px;
+    padding:22px 0;
+    border-top:1px solid var(--panel-line);
+  }
+  .step:first-child{ border-top:none; }
+  .step .idx{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px;
+    color:var(--ink-faint);
+    padding-top:2px;
+  }
+  .step h3{
+    font-size:16px;
+    margin-bottom:6px;
+  }
+  .step p{
+    font-size:13.8px;
+    line-height:1.65;
+    color:var(--ink-dim);
+    margin:0;
+    max-width:48ch;
+  }
+
+  /* offer cards */
+  .offers{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:16px;
+    margin-top:32px;
+  }
+  .offer{
+    border-radius:14px;
+    padding:26px;
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+  }
+  .offer.free{
+    background:var(--panel);
+    border:1px solid var(--panel-line);
+  }
+  .offer.premium{
+    background:linear-gradient(160deg, rgba(79,216,196,0.12), rgba(242,166,90,0.07));
+    border:1px solid rgba(79,216,196,0.35);
+    position:relative;
+  }
+  .offer .tag{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--ink-faint);
+  }
+  .offer.premium .tag{ color:var(--teal); }
+  .offer h3{
+    font-size:19px;
+  }
+  .offer p{
+    font-size:13.6px;
+    line-height:1.6;
+    color:var(--ink-dim);
+    margin:0;
+    flex:1;
+  }
+
+  footer{
+    padding:40px 0 56px;
+    display:flex; align-items:center; justify-content:space-between;
+    flex-wrap:wrap; gap:12px;
+  }
+  footer .wordmark{ opacity:0.75; font-size:14px; }
+  footer .fine{
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11.5px;
+    color:var(--ink-faint);
+  }
+
+  @media (max-width:620px){
+    .mgrid, .offers{ grid-template-columns:1fr; }
+    .hero{ padding:72px 0 60px; }
+  }
+</style>
+</head>
+<body>
+
+  <nav>
+    <div class="wrap">
+      <div class="wordmark"><span class="dot"></span>Mentis</div>
+      <a class="cta" href="#acceso">acceso premium →</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="wrap hero-content">
+      <div class="eyebrow"><span class="bar"></span>Venezuela → Portugal → Canadá</div>
+      <h1 class="hero-title">Me tomó tres países darme cuenta de que tenía mentalidad de <em>empleado</em>.</h1>
+      <p class="hero-sub">Hoy tengo un sistema que trabaja mientras duermo, para no volver a regalar mi tiempo nunca más. Esto es lo que armé — y por qué lo armé.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-primary" href="#guia">Descargar la guía gratis</a>
+        <a class="btn btn-ghost" href="#acceso">Ver el acceso premium</a>
+      </div>
+      <div class="signal" aria-hidden="true">
+        <svg viewBox="0 0 600 52" preserveAspectRatio="none">
+          <polyline class="signal-path" points="0,26 90,26 108,8 126,44 144,26 230,26 248,14 262,38 280,26 600,26"></polyline>
+        </svg>
+      </div>
+    </div>
+  </header>
+
+  <section class="block">
+    <div class="wrap">
+      <p class="kicker">Por qué existe esto</p>
+      <h2 class="block-title">No quería otro truco de redes.<br>Quería recuperar tiempo.</h2>
+      <p class="lead">Soy ingeniero de sistemas. Me obsesiona la disciplina, el orden y todo lo que se puede volver un proceso que funcione solo. Y me molesta genuinamente el tiempo que se pierde haciendo a mano lo que un sistema bien armado puede hacer mejor.</p>
+      <p class="lead">Nací en Venezuela, viví ahí 14 años. Después me mudé a Portugal — nueva cultura, nuevo idioma, otra forma de vivir la vida. Me formé en ingeniería de gestión industrial, pasé 10 años en una multinacional (DHL) aprendiendo sistemas de gestión y mejora continua, y hace poco viví casi 3 años en Canadá. Culturas distintas, formas de trabajar distintas — pero en todas encontré lo mismo: el tiempo es lo más valioso que tenemos, y casi nadie lo aprovecha.</p>
+      <p class="lead">Viviendo esas culturas tan distintas me di cuenta de algo incómodo: yo mismo tenía mentalidad de empleado, no de emprendedor. De ahí nació la semilla — <strong>quiero algo mío, quiero construir algo mío</strong>. Y también quiero ayudarte a vos a construir lo tuyo. Hoy existen herramientas, inteligencia artificial y tendencias nuevas que hacen posible ese cambio de una forma que antes no existía.</p>
+      <p class="lead">Armé esto para <strong>mí</strong> primero — para tener las horas que hoy se van en tareas repetidas, y usarlas en lo que de verdad importa: estar presente con mi hijo, no perseguir mensajes desde el teléfono. Después entendí que si a mí me devolvía tiempo, le podía servir a más gente con el mismo problema — a salir de la mentalidad de empleado y empezar a ser dueño de su propio tiempo.</p>
+
+      <div class="mgrid">
+        <div class="mcard">
+          <div class="num">01</div>
+          <h3>Disciplina, no motivación</h3>
+          <p>No creo en la inspiración del día. Creo en sistemas que funcionan incluso los días en que no tenés ganas.</p>
+        </div>
+        <div class="mcard">
+          <div class="num">02</div>
+          <h3>El tiempo no vuelve</h3>
+          <p>Cada hora que un sistema hace por mí es una hora que le devuelvo a mi familia. Esa es la métrica que más me importa.</p>
+        </div>
+        <div class="mcard">
+          <div class="num">03</div>
+          <h3>Quiero que te sirva a vos también</h3>
+          <p>Si esto me devolvió tiempo a mí, tiene sentido compartirlo con quien esté peleando la misma pelea.</p>
+        </div>
+        <div class="mcard">
+          <div class="num">04</div>
+          <h3>Nunca terminado</h3>
+          <p>No es algo que armé una vez. Aprende algo nuevo todos los días — no se queda quieto ni se conforma.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block">
+    <div class="wrap">
+      <p class="kicker">Cómo funciona, en corto</p>
+      <h2 class="block-title">No es magia. Es un sistema que decide con fundamento.</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="idx mono">01</div>
+          <div>
+            <h3>Aprende todos los días</h3>
+            <p>No se entrenó una sola vez y quedó fijo. Todos los días incorpora algo nuevo, sin fecha de cierre.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="idx mono">02</div>
+          <div>
+            <h3>Decide con datos, no con intuición</h3>
+            <p>Cada decisión — qué publicar, cómo decirlo, cuándo — tiene un fundamento técnico detrás, no una corazonada.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="idx mono">03</div>
+          <div>
+            <h3>Se revisa antes de mostrarse</h3>
+            <p>Nada sale sin que el propio sistema lo valide primero. Si algo no está a la altura, se rehace solo.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="acceso" style="border-bottom:none;">
+    <div class="wrap">
+      <p class="kicker">Empezá acá</p>
+      <h2 class="block-title">Elegí por dónde arrancar</h2>
+      <div class="offers">
+        <div class="offer free" id="guia">
+          <span class="tag">gratis</span>
+          <h3>La guía</h3>
+          <p>Un primer paso concreto, sin costo — para que veas cómo pienso esto antes de dar cualquier otro paso.</p>
+          <a class="btn btn-ghost" href="https://mentis-chatserver.onrender.com/guia-cero" target="_blank" rel="noopener" style="align-self:flex-start;">Descargar guía</a>
+        </div>
+        <div class="offer premium">
+          <span class="tag">acceso premium</span>
+          <h3>Mentis</h3>
+          <p>Acceso directo al sistema completo: le preguntás lo que necesites — de una estrategia de contenido a cómo organizar tu semana — y responde con la misma profundidad con la que yo pienso estos temas.</p>
+          <a class="btn btn-primary" href="https://rodrigo-rojas-uc.systeme.io/efbc577a" target="_blank" rel="noopener" style="align-self:flex-start;">Quiero el acceso</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; width:100%;">
+      <div class="wordmark"><span class="dot" style="box-shadow:0 0 0 4px var(--teal-dim);"></span>Mentis</div>
+      <div class="fine">prototipo — versión inicial</div>
+    </div>
+  </footer>
+
+</body>
+</html>
