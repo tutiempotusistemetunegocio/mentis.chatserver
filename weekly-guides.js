@@ -179,6 +179,15 @@ function bloquesToMarkdown(bloques) {
         const attr = b.autor ? `\n> — ${b.autor}${b.obra ? `, *${b.obra}*` : ''}` : '';
         return `> "${b.texto}"${attr}`;
       }
+      // 'pasos' y 'destacado' (15/9/2026, mismo cambio que guia-cero.js) —
+      // los dos bloques nuevos que guide-pdf.js dibuja como diagrama en el
+      // PDF. En texto plano no hay forma de dibujar un círculo ni una caja,
+      // así que 'pasos' se convierte en lista numerada (mismo contenido y
+      // orden que la línea de tiempo del PDF) y 'destacado' en una cita en
+      // negrita con un ícono, para que se siga leyendo como "esto es lo
+      // importante" sin la caja de color.
+      if (b.tipo === 'pasos') return (b.items || []).map((item, i) => `${i + 1}. ${item}`).join('\n');
+      if (b.tipo === 'destacado') return `> **⭐ ${b.texto}**`;
       return b.texto || '';
     })
     .join('\n\n');
@@ -189,6 +198,8 @@ const VOICE_RULES = `Reglas fijas que nunca se rompen:
 - Nunca copies texto ajeno sin decirlo: si necesitás usar una frase COMPLETA y textual de un autor o libro conocido (una cita real, no una paráfrasis), tenés que atribuirla explícitamente — nombre del autor y, si aplica, el título del libro, dentro del propio texto de la guía (ej. "Como dice Robert Cialdini en Influence: '...'"). Fuera de esos casos puntuales, seguí sintetizando siempre con tus propias palabras.
 - Tono directo y sistemático, sin frases motivacionales vacías ni promesas de resultados garantizados.
 - Nunca menciones que Rodrigo vive en Miami, y no le des mucho peso a su esposa — sí a su disciplina, su historia (Venezuela → Portugal → Canadá), el valor del tiempo y las ganas de ayudar a otros a salir de la mentalidad de empleado.
+- TEXTO CONDENSADO (agregado 15/9/2026 — feedback real sobre la guía cero, aplica igual acá porque es el mismo PDF/formato): cada bloque "parrafo" corto y escaneable, 2 a 4 oraciones como máximo — nunca un párrafo largo de texto corrido. Si un tema necesita más desarrollo, se parte en varios bloques "parrafo" cortos (o se pasa a "lista"/"pasos") en vez de uno solo denso, sin sacar contenido.
+- USÁ LOS BLOQUES VISUALES ("pasos" y "destacado", ver el formato de bloques más abajo) donde tengan sentido, no solo texto — al menos uno de cada uno por guía.
 - La guía no es contenido de valor suelto: es parte del embudo de ventas. Usá, a propósito, lo que está cargado sobre neurociencia/psicología de la persuasión, redes sociales y network marketing — combinado con la historia personal de Rodrigo — para generar conexión real con quien la está leyendo. Esa conexión tiene que desembocar siempre en el cierre de venta del final (ver más abajo), nunca quedarse en pura teoría sin ningún objetivo comercial.`;
 
 async function callMentis(prompt, maxTokens) {
@@ -293,9 +304,11 @@ Basate en todo el conocimiento cargado más abajo.
 
 La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: un PDF con diseño (portada, colores, tipografía) y un texto plano. Para que ambos salgan iguales sin escribir la guía dos veces, en vez de un bloque de texto libre devolvé el contenido dividido en "bloques" — cada uno es un párrafo, un título de sección, una lista o una cita, en el orden en que van apareciendo:
 - {"tipo": "titulo", "texto": "..."} → encabezado de una sección dentro de la guía (no el título general, eso va aparte).
-- {"tipo": "parrafo", "texto": "..."} → texto corrido normal.
-- {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos.
+- {"tipo": "parrafo", "texto": "..."} → texto corrido normal, corto (ver regla de texto condensado arriba).
+- {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos sin orden ni secuencia.
 - {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución — la regla de citar siempre que sea texto ajeno palabra por palabra.
+- {"tipo": "pasos", "items": ["...", "..."]} → una secuencia de pasos o un proceso, en orden. Se dibuja como línea de tiempo numerada.
+- {"tipo": "destacado", "texto": "..."} → una sola frase corta con la idea clave de la sección. Se dibuja como caja resaltada.
 
 Los ÚLTIMOS dos bloques del array (después de todo el contenido) tienen que ser el cierre de venta descripto arriba: un "titulo" y un "parrafo".
 
@@ -475,6 +488,19 @@ function parseGuideMarkdown(md) {
     if (chunk.startsWith('- ')) {
       const items = chunk.split('\n').map((l) => l.replace(/^- /, '').trim()).filter(Boolean);
       return { tipo: 'lista', items };
+    }
+    // 'pasos' y 'destacado' (15/9/2026) — inverso de las dos líneas nuevas
+    // que bloquesToMarkdown() agregó arriba. Sin este caso, un "pasos" caía
+    // en el 'parrafo' genérico de abajo (se seguía viendo el número de cada
+    // paso como texto, nada se perdía) — esto lo reconstruye bien para que
+    // regenerateGuidePdfs() vuelva a dibujar el diagrama, no solo el texto.
+    if (/^1\.\s/.test(chunk)) {
+      const items = chunk.split('\n').map((l) => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
+      return { tipo: 'pasos', items };
+    }
+    if (chunk.startsWith('> **⭐ ')) {
+      const texto = chunk.replace(/^> \*\*⭐ /, '').replace(/\*\*$/, '').trim();
+      return { tipo: 'destacado', texto };
     }
     if (chunk.startsWith('> "')) {
       const chunkLines = chunk.split('\n');

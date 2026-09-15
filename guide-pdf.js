@@ -34,7 +34,12 @@ const COLOR_INK_DIM = '#8fabc4';
 const COLOR_TEAL = '#5fd4c4';
 const COLOR_AMBER = '#f2a65a';
 
-const MARGIN = { top: 76, bottom: 64, left: 60, right: 60 };
+// Márgenes achicados de 60 a 50 (15/9/2026, rediseño de legibilidad —
+// ver el comentario grande más abajo, antes de renderBloque): un poco más
+// de ancho de columna para compensar el cuerpo de texto más grande, sin
+// tocar para nada el resto de las cuentas de la portada/pie de página, que
+// ya usan MARGIN dinámicamente (nunca un número pegado a A4 a mano).
+const MARGIN = { top: 76, bottom: 64, left: 50, right: 50 };
 
 // BUG REAL confirmado con guías reales (6/9/2026): texto que desaparecía
 // exactamente en los quiebres de página automáticos, en toda la guía (no un
@@ -136,41 +141,156 @@ function drawCover(doc, guide) {
   doc.text(cats.toUpperCase(), MARGIN.left, doc.page.height - 100, { width: doc.page.width - MARGIN.left - MARGIN.right, characterSpacing: 0.5 });
 }
 
+// Rediseño de legibilidad (15/9/2026) — feedback real que le llegó a
+// Rodrigo sobre la guía cero: "muy poco atractiva visualmente, difícil de
+// leer en un smartphone", con tres pedidos concretos: letra más grande,
+// texto condensado (eso se resuelve en el PROMPT de guia-cero.js, acá no
+// hay texto que condensar) y sumar figuras/gráficos/diagramas.
+//
+// Para "letra más grande": se sube el tamaño de cada tipo de bloque un
+// 20-25% (11→13.5 el cuerpo, 15→18 los títulos) y se agranda el interlineado
+// (lineGap 3→5). Aunque la página siga siendo A4, esto SÍ se nota leyendo en
+// el celular: casi todos los lectores de PDF en el teléfono abren "ajustado
+// al ancho" — el tamaño que se percibe en pantalla es directamente
+// proporcional al tamaño de fuente sobre el ancho de la página, así que
+// subir la fuente ~23% sube la letra percibida esa misma proporción, sin
+// tocar para nada el ancho de página (que si se cambiara, obligaría a
+// recalcular a mano toda la portada/pie de página de arriba — ver el
+// comentario grande sobre esos dos bugs reales ya encontrados con esa
+// misma cuenta; no vale la pena arriesgar eso de nuevo sin poder probarlo
+// primero con pdfkit corriendo de verdad).
+//
+// Para "figuras/gráficos/diagramas": se suman dos bloques nuevos, dibujados
+// a mano con las formas vectoriales de pdfkit (nunca una imagen externa ni
+// un navegador headless — mismo motivo de memoria que ya explica todo este
+// archivo): 'pasos' (una línea de tiempo vertical numerada, para procesos)
+// y 'destacado' (una caja resaltada para una idea clave), que rompen la
+// pared de texto sin agregar ningún costo de memoria real.
 function renderBloque(doc, bloque) {
   const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
   if (bloque.tipo === 'titulo') {
-    doc.moveDown(0.9);
-    doc.font('Helvetica-Bold').fontSize(15).fillColor(COLOR_TEAL);
+    doc.moveDown(1.0);
+    doc.font('Helvetica-Bold').fontSize(18).fillColor(COLOR_TEAL);
     doc.text(bloque.texto, { width: contentWidth });
-    doc.moveDown(0.3);
+    // Pequeña regla horizontal debajo del título — separa la sección a
+    // simple vista, sin depender de que el lector note el cambio de color.
+    const ruleY = doc.y + 4;
+    doc.save();
+    doc.strokeColor(COLOR_TEAL).opacity(0.5).lineWidth(1.5);
+    doc.moveTo(MARGIN.left, ruleY).lineTo(MARGIN.left + 46, ruleY).stroke();
+    doc.restore();
+    doc.y = ruleY + 10;
     return;
   }
   if (bloque.tipo === 'lista') {
-    doc.moveDown(0.3);
-    doc.font('Helvetica').fontSize(11).fillColor(COLOR_INK);
+    doc.moveDown(0.35);
+    doc.font('Helvetica').fontSize(13).fillColor(COLOR_INK);
     (bloque.items || []).forEach((item) => {
-      doc.text('•  ' + item, { width: contentWidth, lineGap: 3 });
-      doc.moveDown(0.15);
+      doc.text('•  ' + item, { width: contentWidth, lineGap: 4 });
+      doc.moveDown(0.2);
     });
     doc.moveDown(0.3);
     return;
   }
   if (bloque.tipo === 'cita') {
-    doc.moveDown(0.4);
-    doc.font('Helvetica-Oblique').fontSize(11).fillColor(COLOR_AMBER);
-    doc.text('"' + bloque.texto + '"', { width: contentWidth, lineGap: 3 });
+    doc.moveDown(0.45);
+    doc.font('Helvetica-Oblique').fontSize(13).fillColor(COLOR_AMBER);
+    doc.text('"' + bloque.texto + '"', { width: contentWidth, lineGap: 4 });
     if (bloque.autor) {
-      doc.font('Helvetica').fontSize(9.5).fillColor(COLOR_INK_DIM);
+      doc.font('Helvetica').fontSize(10.5).fillColor(COLOR_INK_DIM);
       doc.text('— ' + bloque.autor + (bloque.obra ? ', ' + bloque.obra : ''), { width: contentWidth });
     }
+    doc.moveDown(0.45);
+    return;
+  }
+  // 'pasos' — línea de tiempo vertical numerada (un círculo con el número
+  // por paso, unidos por una línea). Pensado para procesos ("cómo funciona
+  // el sistema", "los pasos para arrancar") — mismo formato de entrada que
+  // 'lista' ({"items": [...]}) para que sea fácil de generar y de leer en
+  // el prompt, aunque el resultado visual sea muy distinto.
+  //
+  // Nota honesta sobre un límite conocido: si un paso individual es tan
+  // largo que su texto cruza un salto de página automático de pdfkit, el
+  // círculo del paso siguiente puede terminar en la página nueva sin la
+  // línea que lo conecta con el anterior — es un defecto cosmético, nunca
+  // se pierde texto (a diferencia de los dos bugs reales de arriba). El
+  // chequeo de espacio de abajo evita el caso más común (un círculo solo,
+  // huérfano, al pie de la página).
+  if (bloque.tipo === 'pasos') {
     doc.moveDown(0.4);
+    const items = (bloque.items || []).filter(Boolean);
+    const circleR = 11;
+    const circleX = MARGIN.left + circleR;
+    const gap = 14;
+    const textX = circleX + circleR + gap;
+    const textWidth = contentWidth - (circleR * 2 + gap);
+    let prevCircleBottom = null;
+    items.forEach((item, i) => {
+      // Si no entra ni el círculo + una línea de texto, se fuerza el salto
+      // de página ANTES de dibujar nada de este paso — mejor un paso entero
+      // en la página siguiente que un círculo cortado al final de esta.
+      if (doc.y + circleR * 2 + 20 > doc.page.height - MARGIN.bottom) {
+        doc.addPage();
+        prevCircleBottom = null; // no conectar la línea a través del salto de página
+      }
+      const stepTop = doc.y;
+      const circleCenterY = stepTop + circleR;
+      if (prevCircleBottom !== null) {
+        doc.save();
+        doc.strokeColor(COLOR_TEAL).opacity(0.35).lineWidth(1.2);
+        doc.moveTo(circleX, prevCircleBottom).lineTo(circleX, circleCenterY - circleR).stroke();
+        doc.restore();
+      }
+      doc.save();
+      doc.fillColor(COLOR_TEAL).circle(circleX, circleCenterY, circleR).fill();
+      doc.restore();
+      doc.save();
+      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(COLOR_BG);
+      doc.text(String(i + 1), circleX - circleR, circleCenterY - 5, { width: circleR * 2, align: 'center', lineBreak: false });
+      doc.restore();
+      doc.font('Helvetica').fontSize(12.5).fillColor(COLOR_INK);
+      doc.text(item, textX, stepTop, { width: textWidth, lineGap: 4 });
+      const stepBottom = Math.max(doc.y, circleCenterY + circleR);
+      prevCircleBottom = circleCenterY + circleR;
+      doc.y = stepBottom + 16;
+    });
+    doc.moveDown(0.3);
+    return;
+  }
+  // 'destacado' — caja resaltada para UNA idea clave (una sola frase corta,
+  // no un párrafo entero: el punto es que se lea de un vistazo). Mismo
+  // chequeo de espacio que 'pasos', por la misma razón.
+  if (bloque.tipo === 'destacado') {
+    doc.moveDown(0.5);
+    const text = bloque.texto || '';
+    const padding = 14;
+    const boxWidth = contentWidth;
+    doc.font('Helvetica-Bold').fontSize(13);
+    const textHeight = doc.heightOfString(text, { width: boxWidth - padding * 2, lineGap: 4 });
+    const boxHeight = textHeight + padding * 2;
+    if (doc.y + boxHeight > doc.page.height - MARGIN.bottom) {
+      doc.addPage();
+    }
+    const boxY = doc.y;
+    doc.save();
+    doc.fillOpacity(0.14);
+    doc.fillColor(COLOR_TEAL).roundedRect(MARGIN.left, boxY, boxWidth, boxHeight, 8).fill();
+    doc.restore();
+    doc.save();
+    doc.fillColor(COLOR_TEAL).rect(MARGIN.left, boxY, 3, boxHeight).fill();
+    doc.restore();
+    doc.fillOpacity(1);
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR_INK);
+    doc.text(text, MARGIN.left + padding, boxY + padding, { width: boxWidth - padding * 2, lineGap: 4 });
+    doc.y = boxY + boxHeight + 10;
+    doc.moveDown(0.3);
     return;
   }
   // 'parrafo' y cualquier tipo desconocido caen acá — nunca se pierde texto
   // por un tipo de bloque que no se reconoce.
-  doc.font('Helvetica').fontSize(11).fillColor(COLOR_INK);
-  doc.text(bloque.texto || '', { width: contentWidth, align: 'left', lineGap: 3 });
-  doc.moveDown(0.5);
+  doc.font('Helvetica').fontSize(13.5).fillColor(COLOR_INK);
+  doc.text(bloque.texto || '', { width: contentWidth, align: 'left', lineGap: 5 });
+  doc.moveDown(0.55);
 }
 
 // BUG REAL encontrado en la primera corrida en vivo (2/9/2026) — el caveat

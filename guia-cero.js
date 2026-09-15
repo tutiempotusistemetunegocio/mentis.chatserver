@@ -114,6 +114,16 @@ function bloquesToMarkdown(bloques) {
         const attr = b.autor ? `\n> — ${b.autor}${b.obra ? `, *${b.obra}*` : ''}` : '';
         return `> "${b.texto}"${attr}`;
       }
+      // 'pasos' y 'destacado' (15/9/2026) — mismos dos bloques nuevos que
+      // renderBloque() dibuja como diagrama en el PDF (ver guide-pdf.js).
+      // Acá no hay forma de dibujar un círculo o una caja en texto plano,
+      // así que se eligió la representación markdown que más se le parece
+      // en significado: 'pasos' es una lista numerada (mismo orden, mismo
+      // contenido que la línea de tiempo del PDF) y 'destacado' es una cita
+      // en negrita con un ícono, para que siga leyéndose como "esto es lo
+      // importante" aunque no tenga la caja de color.
+      if (b.tipo === 'pasos') return (b.items || []).map((item, i) => `${i + 1}. ${item}`).join('\n');
+      if (b.tipo === 'destacado') return `> **⭐ ${b.texto}**`;
       return b.texto || '';
     })
     .join('\n\n');
@@ -166,6 +176,10 @@ const REGLAS_GUIA_CERO = `Reglas fijas que nunca se rompen, específicas de esta
 ${PILARES}
 - Arrancá con un gancho fuerte en la primera o segunda oración — nunca una introducción lenta antes de enganchar.
 - Tono directo y sistemático, sin frases motivacionales vacías ni promesas de resultados garantizados.
+- TEXTO CONDENSADO (agregado 15/9/2026 — feedback real: "muy poco atractiva visualmente, difícil de leer en un smartphone"): cada bloque "parrafo" tiene que ser corto y escaneable — 2 a 4 oraciones como máximo, nunca un párrafo largo de "texto corrido" clásico. Si un pilar necesita más desarrollo, se parte en VARIOS bloques "parrafo" cortos (o se pasa a "lista"/"pasos" donde tenga sentido) en vez de un bloque único y denso. El mensaje tiene que quedar igual de completo — se trata de cortarlo en piezas fáciles de leer en un celular, no de sacar contenido.
+- USÁ LOS BLOQUES VISUALES en cada pilar donde tengan sentido, no solo texto:
+  - {"tipo": "pasos", "items": ["...", "..."]} → cuando expliques un proceso o una secuencia de pasos (ej. "cómo funciona el sistema", "así se arranca"), en vez de una "lista" plana. Se dibuja como una línea de tiempo numerada.
+  - {"tipo": "destacado", "texto": "..."} → UNA frase corta (no un párrafo) con la idea más importante de cada pilar — la que alguien se llevaría si solo leyera eso. Se dibuja como una caja resaltada. Usá como mínimo uno por pilar (5 en total), nunca más de dos seguidos.
 - Nunca reveles ni insinúes el mecanismo interno (que esto sale de un sistema con libros cargados) — tiene que sonar a criterio propio y experiencia real de Rodrigo.
 - Si citás una frase textual completa de un autor/libro conocido, atribuila explícitamente (autor y, si aplica, obra) dentro del propio texto — fuera de eso, siempre en tus propias palabras.
 - Adelantate a la objeción más probable de este público ("no tengo tiempo para esto"), resuelta con la propia historia de Rodrigo como prueba: el sistema devuelve tiempo, no suma otra tarea.
@@ -197,7 +211,10 @@ function detectarProblemasDeCalidad(bloques) {
   // error como "parrafo").
   const terminaciones = /[.!?…”"'）)»]\s*$/;
   bloques.forEach((b, i) => {
-    if ((b.tipo === 'parrafo' || b.tipo === 'cita') && b.texto && b.texto.trim().length > 25 && !terminaciones.test(b.texto.trim())) {
+    // 'destacado' (15/9/2026) sumado a este chequeo — es texto corrido igual
+    // que 'parrafo'/'cita', solo que se dibuja distinto, así que puede
+    // cortarse a mitad de frase de la misma forma.
+    if ((b.tipo === 'parrafo' || b.tipo === 'cita' || b.tipo === 'destacado') && b.texto && b.texto.trim().length > 25 && !terminaciones.test(b.texto.trim())) {
       problemas.push(`Bloque #${i + 1} (${b.tipo}) parece cortado a mitad de frase: "...${b.texto.trim().slice(-60)}"`);
     }
   });
@@ -213,9 +230,11 @@ Basate en todo el conocimiento cargado más abajo para dar profundidad real a ca
 
 La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: un PDF con diseño y un texto plano. Para que ambos salgan iguales, devolvé el contenido dividido en "bloques" — cada uno un párrafo, un título de sección, una lista o una cita, en el orden en que van apareciendo:
 - {"tipo": "titulo", "texto": "..."} → encabezado de una sección dentro de la guía (no el título general, eso va aparte).
-- {"tipo": "parrafo", "texto": "..."} → texto corrido normal.
-- {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos.
+- {"tipo": "parrafo", "texto": "..."} → texto corrido normal, corto (ver regla de texto condensado arriba).
+- {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos sin orden ni secuencia.
 - {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución.
+- {"tipo": "pasos", "items": ["...", "..."]} → una secuencia de pasos o un proceso, en orden. Se dibuja como línea de tiempo numerada.
+- {"tipo": "destacado", "texto": "..."} → una sola frase corta con la idea clave de la sección. Se dibuja como caja resaltada.
 
 Los ÚLTIMOS dos bloques del array tienen que ser el cierre de venta descripto arriba: un "titulo" y un "parrafo".
 
