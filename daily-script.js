@@ -221,27 +221,18 @@ ${angleTypeNote}
 
 Basate en todo el conocimiento cargado más abajo — combiná lo que haga falta (marketing, mentalidad, ventas, redes, lo que aplique), como lo haría alguien que domina todas esas áreas a la vez.
 
-Además del guion completo (pensado como registro/respaldo, no para narrarse: el reel se publica SIN voz, solo música + texto en pantalla), el clip de video que se genera con IA a partir de tu foto real de hoy dura como máximo 12 segundos por pedido — techo de la plataforma, no ajustable.
+Además del guion completo (pensado como registro/respaldo, no para narrarse: el reel se publica SIN voz, solo música + texto en pantalla), el clip de video que se genera con IA a partir de tu foto real de hoy dura como máximo 12 segundos por pedido — techo de la plataforma, no ajustable. Pedido explícito de Rodrigo (15/9/2026): siempre UN SOLO clip, nunca lo dividas en dos partes — describí una sola escena ("escenaVisual") que condense el gancho central de hoy en UN SOLO momento concreto y filmable en 12s, nunca una secuencia de varias escenas ni algo que necesite más de 12s para leerse o tener sentido.
 
-Antes de describir la escena, decidí "dosPartes": ¿el ángulo de hoy entra cómodo en UN SOLO momento de 12s, o realmente tiene DOS momentos distintos que se benefician de separarse en dos clips consecutivos (ej. el problema y después la vuelta, el mito y después la realidad, el antes y después el después)? Elegí dos partes SOLO cuando de verdad sume claridad al gancho — la mayoría de los días un solo momento bien elegido alcanza; no partas en dos por variedad ni porque sí, cada parte de más es un pedido de video real (costo y tiempo) que tiene que ganarse su lugar.
+Lo más importante de esa escena es el CONTENIDO, no el estilo: tiene que mostrar una acción concreta directamente relacionada con el gancho de hoy — alguien haciendo algo específico que lo dramatice (ej. si el gancho es sobre disciplina y hábitos, no alcanza con "alguien trabajando de noche": mostrá la acción puntual que representa eso — apagando el teléfono para volver a escribir, tachando una tarea en una libreta, etc.). Empezá describiendo ESA acción concreta en una frase, y recién después sumá 1-2 detalles de ambiente/iluminación si hacen falta — nunca al revés, y nunca una escena que sea solo ambiente/mood sin ninguna acción puntual. Escribila directamente en inglés, lista para usarse tal cual como prompt de generación de video (describí solo lo que la cámara ve — acción, ambiente, iluminación — nunca diálogo ni texto en pantalla).
 
-Si dosPartes es false (el caso más común): describí una sola escena ("escenaVisual") que condense el gancho central de hoy en UN SOLO momento concreto y filmable en 12s — nunca una secuencia de varias escenas ni algo que necesite más de 12s para leerse o tener sentido.
+Además, para cuando el clip se genera a mano en el modo "AI Director" de Higgsfield (Cinema Studio — arma música y captions, a diferencia de la API que solo genera el video mudo), describí también el texto en pantalla y la música. Regla fija para TODO reel (pedido explícito de Rodrigo, 9/9/2026, "quiero que todos los reel acaben com el CTA Mentis"): el texto en pantalla siempre tiene que ABRIR con un gancho o una frase que despierte curiosidad genuina sobre el tema de hoy (algo que frene el scroll en el primer segundo), y siempre tiene que CERRAR invitando a comentar la palabra "MENTIS" en pantalla al final.
+- "captionText": el texto que aparece en pantalla durante el clip: empezá con el gancho/curiosidad de hoy en una frase corta y directa, y cerrá fundiendo eso con la invitación a comentar "MENTIS" — puede ser una sola frase que haga las dos cosas, o dos frases cortas en secuencia si el gancho lo pide, siempre en español, pensado para leerse cómodo en un clip de 12-15s.
+- "musicStyle": el tipo de música de fondo que mejor acompaña el tono de hoy — corto, en inglés, como se describiría a una herramienta de generación (ej. "tense minimal piano, slow build" o "upbeat motivational synth, driving rhythm"), coherente con la energía del ángulo de hoy.
 
-Si dosPartes es true: describí dos escenas separadas y consecutivas ("escenaVisualParte1", "escenaVisualParte2"), cada una su propio momento concreto de hasta 12s — Parte 1 planta el problema/gancho, Parte 2 es la vuelta/resolución. Cada una tiene que tener sentido como clip independiente, no depender de que se vean pegadas una a la otra.
+El CTA final ("cta", el texto que Rodrigo pega como descripción real del post al publicarlo) tiene que ser una venta real, no un cierre genérico: usando la conexión que generaste en el guion (historia + el ángulo de hoy), invitá explícitamente a comentar la palabra "MENTIS" para recibir una guía gratis — esa palabra fija es la puerta de entrada al embudo completo (guía gratis → oferta premium), siempre la misma, nunca inventes otra distinta por día ni un link que no exista.
 
-En cualquiera de los dos casos, lo más importante de cada escena es el CONTENIDO, no el estilo: tiene que mostrar una acción concreta directamente relacionada con el momento que le toca — alguien haciendo algo específico que dramatice ese momento (ej. si el gancho es sobre disciplina y hábitos, no alcanza con "alguien trabajando de noche": mostrá la acción puntual que representa eso — apagando el teléfono para volver a escribir, tachando una tarea en una libreta, etc.). Empezá describiendo ESA acción concreta en una frase, y recién después sumá 1-2 detalles de ambiente/iluminación si hacen falta — nunca al revés, y nunca una escena que sea solo ambiente/mood sin ninguna acción puntual. Escribilas directamente en inglés, listas para usarse tal cual como prompt de generación de video (describí solo lo que la cámara ve — acción, ambiente, iluminación — nunca diálogo ni texto en pantalla).
-
-Además, para cuando el clip se genera a mano en el modo "AI Director" de Higgsfield (Cinema Studio — arma música y captions, a diferencia de la API que solo genera el video mudo), describí también el texto en pantalla y la música. Regla fija para TODO reel (pedido explícito de Rodrigo, 9/9/2026, "quiero que todos los reel acaben com el CTA Mentis"): el texto en pantalla siempre tiene que ABRIR con un gancho o una frase que despierte curiosidad genuina sobre el tema de hoy (algo que frene el scroll en el primer segundo), y siempre tiene que CERRAR invitando a comentar la palabra "MENTIS" — ningún reel, sea de una parte o de dos, queda sin esa invitación en pantalla al final.
-- Si dosPartes es false: "captionText" — el texto que aparece en pantalla durante el clip: empezá con el gancho/curiosidad de hoy en una frase corta y directa, y cerrá fundiendo eso con la invitación a comentar "MENTIS" — puede ser una sola frase que haga las dos cosas, o dos frases cortas en secuencia si el gancho lo pide, siempre en español, pensado para leerse cómodo en un clip de 12-15s.
-- Si dosPartes es true: "captionTextParte1" (el gancho/curiosidad que abre, mismo criterio de arriba, sin el CTA todavía — eso lo cierra la parte 2) y "captionTextParte2" — como es el cierre del reel, ese texto en pantalla tiene que fundir la resolución CON la invitación a comentar "MENTIS" en una sola frase corta y natural (una sola idea que cierre y empuje a la acción a la vez, no dos frases pegadas).
-- "musicStyle" (una sola, se usa en las dos partes si son dos): el tipo de música de fondo que mejor acompaña el tono de hoy — corto, en inglés, como se describiría a una herramienta de generación (ej. "tense minimal piano, slow build" o "upbeat motivational synth, driving rhythm"), coherente con la energía del ángulo de hoy.
-
-El CTA final ("cta", el texto que Rodrigo pega como descripción real del post al publicarlo) tiene que ser una venta real, no un cierre genérico: usando la conexión que generaste en el guion (historia + el ángulo de hoy), invitá explícitamente a comentar la palabra "MENTIS" para recibir una guía gratis — esa palabra fija es la puerta de entrada al embudo completo (guía gratis → oferta premium), siempre la misma, nunca inventes otra distinta por día ni un link que no exista. Esto va siempre, tengas o no dosPartes — aunque con dosPartes el clip mismo ya insinúe la invitación en pantalla (captionTextParte2), el texto completo del CTA sigue yendo acá para pegarse como descripción del post.
-
-Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código. Si dosPartes es false, con esta forma exacta:
-{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "dosPartes": false, "escenaVisual": "<en inglés, la escena única de hasta 12s>", "captionText": "<en español, el texto exacto del caption en pantalla>", "musicStyle": "<en inglés, el estilo de música de fondo>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<CTA de venta real, con la palabra clave a comentar>"}
-Si dosPartes es true, en cambio, con esta forma exacta:
-{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras>", "dosPartes": true, "escenaVisualParte1": "<en inglés>", "escenaVisualParte2": "<en inglés>", "captionTextParte1": "<en español>", "captionTextParte2": "<en español, resolución + invitación a comentar MENTIS>", "musicStyle": "<en inglés>", "guion": "<el guion completo>", "cta": "<CTA de venta real, con la palabra clave a comentar>"}
+Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
+{"formato": "reel" o "carrusel", "angulo": "<etiqueta corta, 3-8 palabras, del gancho central de hoy>", "escenaVisual": "<en inglés, la escena única de hasta 12s>", "captionText": "<en español, el texto exacto del caption en pantalla>", "musicStyle": "<en inglés, el estilo de música de fondo>", "guion": "<el guion completo, listo para grabar/diseñar>", "cta": "<CTA de venta real, con la palabra clave a comentar>"}
 
 --- CONOCIMIENTO DE MENTIS ---
 ${fullKnowledgeSnapshot()}`;
@@ -314,18 +305,17 @@ async function runDailyScript() {
     try {
       const reel = await generateReelScript(dateStr, wIdx, history);
       const fname = `${dateStr}-${reel.formato === 'carrusel' ? 'carrusel' : 'reel'}.md`;
-      const videoNote = reel.dosPartes ? '\n\n**Video:** 2 partes (parte 1 + parte 2)' : '';
-      const body = `# ${dateStr} — ${reel.formato}\n\n**Ángulo:** ${reel.angulo}${videoNote}\n\n---\n\n${reel.guion}\n\n---\n\n**CTA:** ${reel.cta}\n`;
+      const body = `# ${dateStr} — ${reel.formato}\n\n**Ángulo:** ${reel.angulo}\n\n---\n\n${reel.guion}\n\n---\n\n**CTA:** ${reel.cta}\n`;
       fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
+      // Pedido explícito de Rodrigo (15/9/2026): nunca más dividir el reel en
+      // dos partes — dosPartes queda afuera del todo (ni se pide, ni se
+      // guarda). daily-media.js sigue sabiendo leer un `dosPartes: true` de
+      // una entrada VIEJA del historial (por compatibilidad con lo ya
+      // generado), pero ninguna entrada nueva lo va a tener nunca más.
       history.entries.push({
         date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo,
-        dosPartes: !!reel.dosPartes,
         escenaVisual: reel.escenaVisual || null,
-        escenaVisualParte1: reel.escenaVisualParte1 || null,
-        escenaVisualParte2: reel.escenaVisualParte2 || null,
         captionText: reel.captionText || null,
-        captionTextParte1: reel.captionTextParte1 || null,
-        captionTextParte2: reel.captionTextParte2 || null,
         musicStyle: reel.musicStyle || null,
       });
       generated.push(fname);

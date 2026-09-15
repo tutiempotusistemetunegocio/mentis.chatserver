@@ -319,6 +319,25 @@ function pickRelevantKnowledge(userMessage) {
   return { knowledge, usedBlocks, looseBlocks };
 }
 
+// Instrucción de las directivas opcionales de gráfico/PDF (pedido explícito
+// de Rodrigo, 15/9/2026: "quiero que el chat premium pueda devolver
+// gráficos, infografías, pdf... según lo que pida el usuario"). A propósito
+// es Mentis quien decide, pregunta por pregunta, si hace falta uno de los
+// dos — no un comando fijo que el cliente tenga que aprenderse. El parseo de
+// estos bloques (sacarlos del texto, convertir el JSON en SVG o en PDF real)
+// vive en chat-render.js — acá solo se le explica a Claude el formato.
+const CHART_PDF_INSTRUCTIONS = `
+
+Además de tu respuesta en texto de siempre, cuando el pedido del cliente lo amerite de verdad (pidió explícitamente un gráfico, una infografía, un PDF, un documento o reporte para descargar, algo "para guardar" o "para imprimir", etc.) podés agregar, SIEMPRE al final de tu respuesta y después de haber respondido normalmente en texto (nunca en lugar del texto), uno de estos dos bloques de código. Si el cliente no pidió nada de esto, NO agregues ninguno de los dos — la gran mayoría de las respuestas no lleva ninguno.
+
+Para un gráfico, un bloque \`\`\`mentis-chart con este JSON exacto:
+{"tipo": "barras" | "lineas" | "torta", "titulo": "...", "categorias": ["...", "..."], "series": [{"nombre": "... (opcional si hay una sola serie)", "valores": [numero, numero, ...]}]}
+
+Para un PDF, un bloque \`\`\`mentis-pdf con este JSON exacto:
+{"titulo": "...", "subtitulo": "... (opcional)", "bloques": [{"tipo": "titulo", "texto": "..."}, {"tipo": "parrafo", "texto": "..."}, {"tipo": "lista", "items": ["...", "..."]}, {"tipo": "cita", "texto": "...", "autor": "... (opcional)"}]}
+
+Reglas importantes: el JSON tiene que ser válido y no llevar comentarios ni texto extra adentro del bloque. Nunca muestres ese JSON crudo dentro del texto normal de tu respuesta ni lo menciones — el cliente nunca ve el bloque, solo el gráfico o el link de descarga que el sistema arma a partir de él. Como mucho un bloque de cada tipo por respuesta.`;
+
 function buildSystemPrompt(knowledge, looseBlocks) {
   const looseNote = looseBlocks.length > 0
     ? `\n\nAdemás de los bloques principales, más abajo hay "ideas sueltas" de otras áreas que no son el tema central de la pregunta pero pueden aportar una conexión útil (marcadas como "idea suelta de: ..."). Úsalas solo si de verdad suman profundidad a la respuesta — un dato o ángulo que la enriquezca — nunca las fuerces ni las menciones solo por completar. Si no aportan nada real a esta pregunta puntual, ignoralas.`
@@ -328,6 +347,7 @@ function buildSystemPrompt(knowledge, looseBlocks) {
 A continuación tenés varios bloques de conocimiento, cada uno marcado con su fuente. Cuando la pregunta toca un solo tema, respondé apoyándote en ese bloque. Cuando la pregunta mezcla varios temas a la vez (por ejemplo marketing + multinivel + organización del tiempo, todo en la misma consulta), NO respondas cada tema por separado ni pegues respuestas una detrás de otra: combiná el conocimiento relevante de todos los bloques en una sola respuesta coherente y con profundidad técnica real, como lo haría alguien que domina las áreas a la vez y ve cómo se conectan entre sí. No inventes fuentes ni datos que no estén acá.${looseNote}
 
 Nada de lo que aprendiste se pierde nunca — pero no todo sigue vigente. Si una línea de un bloque empieza con la etiqueta "[desactualizado: ...]", quedó ahí archivada a propósito: no la uses como base de tu respuesta, ignorala igual que ignorarías una nota vieja que ya no aplica. El resto del contenido, sin esa etiqueta, es lo que hoy Mentis considera vigente.
+${CHART_PDF_INSTRUCTIONS}
 
 ${knowledge}`;
 }
@@ -368,7 +388,12 @@ async function callClaude(userMessage, archivo) {
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 1200,
+      // Subido de 1200 a 2000 (15/9/2026): con la directiva opcional de
+      // gráfico/PDF (ver CHART_PDF_INSTRUCTIONS abajo) la respuesta puede
+      // llevar, además del texto de siempre, un bloque de JSON al final —
+      // 1200 se quedaba corto justo en esos casos y cortaba la respuesta a
+      // la mitad.
+      max_tokens: 2000,
       system: systemPrompt,
       messages: [{ role: 'user', content }],
     }),
@@ -498,7 +523,29 @@ function serveStatic(req, res) {
   });
 }
 
+// --- CORS ---------------------------------------------------------------
+// El widget de chat embebido en mentis-pagina-personal.html (Netlify, un
+// origen distinto al de este servidor en Render) manda 'content-type:
+// application/json' + el header propio 'x-mentis-email' en cada POST /chat
+// — eso hace que el navegador dispare un preflight OPTIONS antes del POST
+// real, y sin una respuesta explícita a ese OPTIONS el navegador nunca
+// llega a mandar el POST (lo bloquea del todo, ni siquiera llega a los
+// logs del servidor). CORS_HEADERS se reutiliza en cualquier respuesta que
+// un cliente de OTRO origen pueda necesitar leer (el chat, sus PDFs
+// armados al vuelo, las guías del chat premium) — sendJSON ya lo traía
+// suelto, esto lo deja centralizado para no repetirlo ruta por ruta.
+const CORS_HEADERS = {
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, POST, OPTIONS',
+  'access-control-allow-headers': 'content-type, x-mentis-email',
+};
+
 const server = http.createServer((req, res) => {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, CORS_HEADERS);
+    return res.end();
+  }
+
   if (req.method === 'GET' && req.url === '/health') {
     return sendJSON(res, 200, { ok: true, mode: process.env.ANTHROPIC_API_KEY ? 'live' : 'demo' });
   }
@@ -767,6 +814,53 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Tech UGC (Módulo 08 → daily-techugc.js, 15/9/2026) — pedido explícito de
+  // Rodrigo: sección diaria dedicada a buscar apps de IA interesantes (con
+  // búsqueda web real) y escribirle un guion de reel UGC para promocionarlas.
+  // Mismo patrón de secreto que el resto de las rutas /internal/*, disparada
+  // una vez por día por GitHub Actions (ver daily-techugc.yml).
+  if (req.method === 'POST' && req.url === '/internal/daily-techugc') {
+    const expected = process.env.TECHUGC_SECRET;
+    const got = req.headers['x-techugc-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'TECHUGC_SECRET no está configurado — Tech UGC está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    // eslint-disable-next-line global-require
+    const { runDailyTechUgc } = require('./daily-techugc');
+    runDailyTechUgc()
+      .then((result) => sendJSON(res, result.ok === false ? 400 : 200, result))
+      .catch((err) => {
+        console.error('Error generando el Tech UGC diario:', err.message);
+        sendJSON(res, 500, { ok: false, error: err.message });
+      });
+    return;
+  }
+
+  // Agregar una app a la watchlist de Tech UGC a mano (mismo secreto que
+  // arriba — es el mismo módulo). Pensado para dispararse con curl, mismo
+  // estilo simple que ya usó Rodrigo para el self-grant de acceso premium.
+  // Body: {"name": "...", "url": "... (opcional)", "nota": "... (opcional, por qué le interesa)"}.
+  if (req.method === 'POST' && req.url === '/internal/techugc-watchlist') {
+    const expected = process.env.TECHUGC_SECRET;
+    const got = req.headers['x-techugc-secret'];
+    if (!expected) return sendJSON(res, 501, { error: 'TECHUGC_SECRET no está configurado — Tech UGC está desactivado hasta que se cargue.' });
+    if (got !== expected) return sendJSON(res, 401, { error: 'Secreto inválido.' });
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON inválido.' }); }
+      // eslint-disable-next-line global-require
+      const { addToWatchlist } = require('./daily-techugc');
+      addToWatchlist(parsed)
+        .then((watchlist) => sendJSON(res, 200, { ok: true, entradas: watchlist.entries.length }))
+        .catch((err) => {
+          console.error('Error agregando a la watchlist de Tech UGC:', err.message);
+          sendJSON(res, 400, { ok: false, error: err.message });
+        });
+    });
+    return;
+  }
+
   // Herramienta de administración puntual, NO recurrente (Módulo 08 →
   // admin-reset.js). Pedido explícito de Rodrigo (4/9/2026): "quiero que
   // borres todas las guías y la vamos a hacer otra vez todo de nuevo con el
@@ -837,8 +931,24 @@ const server = http.createServer((req, res) => {
     if (!expected || !urlSecret || urlSecret !== expected) { res.writeHead(404); return res.end('No encontrado'); }
     // eslint-disable-next-line global-require
     const {
-      renderPanel, renderGuideContent, renderGuidePdf, renderGuiaCeroContent, renderGuiaCeroPdf,
+      renderPanel, renderGuideContent, renderGuidePdf, renderGuiaCeroContent, renderGuiaCeroPdf, renderReelPdf,
     } = require('./panel');
+    // PDF de un reel puntual (15/9/2026, ver panel.js → renderReelPdf) — va
+    // antes de la rama de guías de abajo porque 'reel' nunca puede
+    // confundirse con 'guia'/'guia-cero', mismo criterio que esas dos.
+    if (parts[2] === 'reel' && parts[3] && parts[4] === 'pdf') {
+      renderReelPdf(decodeURIComponent(parts[3]))
+        .then((buffer) => {
+          if (buffer === null) { res.writeHead(404); return res.end('No hay ningún reel guardado para esa fecha.'); }
+          res.writeHead(200, { 'content-type': 'application/pdf' });
+          res.end(buffer);
+        })
+        .catch((err) => {
+          console.error('Error armando el PDF de un reel:', err.message);
+          res.writeHead(500); res.end('No se pudo armar el PDF: ' + err.message);
+        });
+      return;
+    }
     // Guía cero (6/9/2026) — rutas propias, separadas de /guia/<id>, porque
     // no vive en el catálogo (guide-catalog.json): siempre el mismo archivo
     // fijo. 'guia-cero' nunca puede confundirse con un id real del catálogo
@@ -1079,7 +1189,7 @@ const server = http.createServer((req, res) => {
     serveGuidePdfForPremiumChat(id)
       .then((buffer) => {
         if (buffer === null) { res.writeHead(404); return res.end('Guía no encontrada.'); }
-        res.writeHead(200, { 'content-type': 'application/pdf' });
+        res.writeHead(200, { 'content-type': 'application/pdf', ...CORS_HEADERS });
         res.end(buffer);
       })
       .catch((err) => {
@@ -1120,13 +1230,99 @@ const server = http.createServer((req, res) => {
       if (!userMessage) return sendJSON(res, 400, { error: 'Falta el mensaje.' });
       try {
         const result = await callClaude(userMessage, parsed.archivo || null);
-        sendJSON(res, 200, result);
+        // Gráfico y/o PDF opcionales (15/9/2026, ver chat-render.js) — se
+        // procesan acá, después de callClaude, porque acá es donde tenemos
+        // la URL real del servidor para armar el link de descarga del PDF.
+        // eslint-disable-next-line global-require
+        const { processChatReply } = require('./chat-render');
+        const baseUrl = `https://${req.headers.host}`;
+        const rendered = await processChatReply(result.reply, baseUrl);
+        sendJSON(res, 200, {
+          ...result,
+          reply: rendered.text,
+          visual: rendered.visual,
+          pdfUrl: rendered.pdfUrl,
+        });
       } catch (err) {
         console.error('Error llamando a la API de Claude:', err.message);
         // ArchivoError es un problema del archivo que mandó el cliente
         // (tipo no admitido, demasiado pesado) — el mensaje ya está
         // pensado para mostrarse tal cual, y es un 400 (culpa del
         // pedido), no un 500 (culpa del servidor/la API).
+        if (err instanceof ArchivoError) return sendJSON(res, 400, { error: err.message });
+        sendJSON(res, 500, { error: 'Mentis no pudo responder ahora mismo. Intentá de nuevo en un momento.' });
+      }
+    });
+    return;
+  }
+
+  // PDF armado al vuelo por el chat (15/9/2026, ver chat-render.js) — el id
+  // es un token al azar de 32 caracteres hex (128 bits), imposible de
+  // adivinar, así que no hace falta repetir el chequeo de acceso premium acá
+  // (mismo criterio que /guia/<id>, que también es un link "de posesión").
+  // Vive solo en memoria y con TTL corto — pasado ese rato, o si el proceso
+  // se reinició (Render free tier), devuelve 404 con un mensaje claro en vez
+  // de un error críptico.
+  if (req.method === 'GET' && req.url.split('?')[0].replace(/\/+$/, '').startsWith('/chat/render/')) {
+    const raw = decodeURIComponent(req.url.split('?')[0].replace(/\/+$/, '').slice('/chat/render/'.length));
+    const id = raw.endsWith('.pdf') ? raw.slice(0, -4) : raw;
+    // eslint-disable-next-line global-require
+    const { getPdf } = require('./chat-render');
+    const buffer = getPdf(id);
+    if (!buffer) { res.writeHead(404, CORS_HEADERS); return res.end('Este PDF ya no está disponible — se guarda solo un rato después de armarse. Pedile a Mentis que lo genere de nuevo.'); }
+    res.writeHead(200, { 'content-type': 'application/pdf', ...CORS_HEADERS });
+    res.end(buffer);
+    return;
+  }
+
+  // Chat sin login del panel personal (15/9/2026) — pedido explícito de
+  // Rodrigo: "también quiero que mi panel Mentis tenga el chat sin necesidad
+  // de login". A diferencia de POST /chat (clientes premium, exige el header
+  // x-mentis-email + hasAccess), acá NO hay ningún control de acceso de
+  // email — el candado ya es el propio PANEL_SECRET en la URL (igual que
+  // el resto de /panel/*, arriba): quien tiene ese link ya es Rodrigo, así
+  // que no tiene sentido pedirle que además se identifique con un email
+  // adentro de su propio panel. Mismo callClaude() de siempre (mismo
+  // conocimiento, misma voz de Mentis) y las mismas directivas opcionales de
+  // gráfico/PDF que el chat premium.
+  if (req.method === 'POST' && req.url.startsWith('/panel/')) {
+    const expected = process.env.PANEL_SECRET;
+    const parts = req.url.split('?')[0].split('/').filter(Boolean); // ['panel', '<secreto>', 'chat']
+    const urlSecret = parts[1] || null;
+    if (!expected || !urlSecret || urlSecret !== expected || parts[2] !== 'chat') {
+      res.writeHead(404); return res.end('No encontrado');
+    }
+    let body = '';
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      body += chunk;
+      if (body.length > CHAT_FILE_MAX_BASE64_CHARS + 2000000) {
+        tooLarge = true;
+        sendJSON(res, 413, { error: `El pedido es demasiado grande (máximo ${CHAT_FILE_MAX_MB}MB de archivo adjunto).` });
+        req.destroy();
+      }
+    });
+    req.on('end', async () => {
+      if (tooLarge) return;
+      let parsed;
+      try { parsed = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'JSON inválido.' }); }
+      const userMessage = (parsed.message || '').trim();
+      if (!userMessage) return sendJSON(res, 400, { error: 'Falta el mensaje.' });
+      try {
+        const result = await callClaude(userMessage, parsed.archivo || null);
+        // eslint-disable-next-line global-require
+        const { processChatReply } = require('./chat-render');
+        const baseUrl = `https://${req.headers.host}`;
+        const rendered = await processChatReply(result.reply, baseUrl);
+        sendJSON(res, 200, {
+          ...result,
+          reply: rendered.text,
+          visual: rendered.visual,
+          pdfUrl: rendered.pdfUrl,
+        });
+      } catch (err) {
+        console.error('Error llamando a la API de Claude (panel):', err.message);
         if (err instanceof ArchivoError) return sendJSON(res, 400, { error: err.message });
         sendJSON(res, 500, { error: 'Mentis no pudo responder ahora mismo. Intentá de nuevo en un momento.' });
       }

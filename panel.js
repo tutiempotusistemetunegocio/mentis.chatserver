@@ -36,6 +36,7 @@
 //  - GET /panel/<secreto>/guia-cero/pdf  → el PDF con diseño de la guía cero.
 
 const { getDropboxAccessToken } = require('./dropbox-auth');
+const { renderDocPDF } = require('./doc-pdf');
 
 const GUIDES_FOLDER = process.env.DROPBOX_GUIDES_FOLDER || '/mentis-guias';
 // Guía cero (guia-cero.js, 6/9/2026) — archivo fijo, siempre el mismo
@@ -47,6 +48,7 @@ const GUIA_CERO_META = `${GUIDES_FOLDER}/guia-cero-meta.json`;
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
 const MEDIA_FOLDER = process.env.DROPBOX_MEDIA_FOLDER || '/mentis-medios';
 const KNOWLEDGE_FOLDER = process.env.DROPBOX_KNOWLEDGE_FOLDER || '/mentis-reglas';
+const TECHUGC_FOLDER = process.env.DROPBOX_TECHUGC_FOLDER || '/mentis-techugc';
 const FETCH_TIMEOUT_MS = 20000;
 
 async function dropboxDownloadJSON(token, dropboxPath, fallback) {
@@ -99,7 +101,10 @@ function connectionStatus() {
 
 async function loadPanelData() {
   const token = await getDropboxAccessToken();
-  const [catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels, guiaCeroMeta] = await Promise.all([
+  const [
+    catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels, guiaCeroMeta,
+    techUgcHistory, techUgcWatchlist,
+  ] = await Promise.all([
     dropboxDownloadJSON(token, `${GUIDES_FOLDER}/guide-catalog.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${CONTENT_FOLDER}/content-history.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${MEDIA_FOLDER}/photo-history.json`, { entries: [] }),
@@ -107,9 +112,12 @@ async function loadPanelData() {
     dropboxDownloadJSON(token, `${KNOWLEDGE_FOLDER}/strategy-opportunities.json`, { entries: [] }),
     dropboxDownloadJSON(token, `${KNOWLEDGE_FOLDER}/business-models.json`, { entries: [] }),
     dropboxDownloadJSON(token, GUIA_CERO_META, null),
+    dropboxDownloadJSON(token, `${TECHUGC_FOLDER}/techugc-history.json`, { entries: [] }),
+    dropboxDownloadJSON(token, `${TECHUGC_FOLDER}/techugc-watchlist.json`, { entries: [] }),
   ]);
   return {
     token, catalog, contentHistory, photoHistory, videoHistory, opportunities, businessModels, guiaCeroMeta,
+    techUgcHistory, techUgcWatchlist,
   };
 }
 
@@ -132,12 +140,22 @@ function videoPromptCard(e, part, parteLabel) {
 // Un día puede tener un solo clip (forma plana de siempre, entry.partes no
 // existe) o dos (entry.partes = [{parte:1,...}, {parte:2,...}]) — ver
 // daily-media.js. Esto arma una o dos tarjetas según corresponda, sin que el
-// resto del panel tenga que saber la diferencia.
-function videoPromptCards(e) {
+// resto del panel tenga que saber la diferencia. `secret` es opcional (si no
+// se pasa, no se muestra el link de PDF) — así esta función sigue sirviendo
+// igual en cualquier lugar que todavía no tenga el secreto a mano.
+//
+// El link de "PDF del reel" (15/9/2026, pedido explícito de Rodrigo: "que mi
+// panel personal consiga descargar los PDF de los Reels") va UNA vez por
+// día, no una vez por parte — cubre todas las partes de ese día en el mismo
+// documento (ver renderReelPdf más abajo).
+function videoPromptCards(e, secret) {
+  const pdfLink = secret
+    ? `<p class="mt"><a href="/panel/${secret}/reel/${encodeURIComponent(e.date)}/pdf" target="_blank">Descargar PDF de este reel</a></p>`
+    : '';
   if (Array.isArray(e.partes) && e.partes.length) {
-    return e.partes.map((p) => videoPromptCard(e, p, `Parte ${p.parte}`)).join('');
+    return e.partes.map((p) => videoPromptCard(e, p, `Parte ${p.parte}`)).join('') + pdfLink;
   }
-  return videoPromptCard(e, e, null);
+  return videoPromptCard(e, e, null) + pdfLink;
 }
 
 function guideRow(g, secret) {
@@ -206,8 +224,8 @@ async function renderPanel(secret) {
       <table><tbody>
         ${recentPhotos.map((e) => `<tr><td class="dim">${esc(e.date)}</td><td>${esc(e.file)}</td><td class="dim">${esc(e.angulo || '')}</td></tr>`).join('') || '<tr><td class="dim">Sin datos todavía.</td></tr>'}
       </tbody></table>
-      <h3 class="mt">Prompt de video del día <span class="count">lo que se le pide a Higgsfield, no solo el resultado — 1 o 2 tarjetas por día, ver "dosPartes"</span></h3>
-      ${recentVideoPrompts.length ? recentVideoPrompts.map((e) => videoPromptCards(e)).join('') : '<p class="dim">Sin datos todavía — se guarda a partir del primer pedido de video después de este cambio.</p>'}
+      <h3 class="mt">Prompt de video del día <span class="count">lo que se le pide a Higgsfield, no solo el resultado</span></h3>
+      ${recentVideoPrompts.length ? recentVideoPrompts.map((e) => videoPromptCards(e, secret)).join('') : '<p class="dim">Sin datos todavía — se guarda a partir del primer pedido de video después de este cambio.</p>'}
     </section>`;
 
   const statusSection = `
@@ -241,13 +259,138 @@ async function renderPanel(secret) {
         </div>`).join('') : '<p class="dim">Todavía ninguno — corré "Modelos de negocio" desde GitHub Actions para generar los primeros.</p>'}
     </section>`;
 
+  const recentTechUgc = [...data.techUgcHistory.entries].slice(-10).reverse();
+  const pendingWatchlist = data.techUgcWatchlist.entries.filter((w) => !w.usada);
+  const techUgcSection = `
+    <section>
+      <h2>Tech UGC <span class="count">una app de IA por día, con guion de reel listo para grabar</span></h2>
+      <p class="hint">Todos los días (daily-techugc.js) Mentis elige una app de inteligencia artificial — primero de tu lista de interés de abajo si tiene alguna pendiente, si no busca sola en vivo — y te escribe el guion completo en inglés, para grabarlo mostrando tu cara real, mismo estilo que ya usás para SideShift.app.</p>
+      ${pendingWatchlist.length ? `<p class="dim">${pendingWatchlist.length} app(s) en tu lista todavía sin cubrir: ${pendingWatchlist.map((w) => esc(w.name)).join(', ')}.</p>` : '<p class="dim">Tu lista de interés está vacía o ya se cubrió entera — Mentis está buscando apps nuevas por su cuenta.</p>'}
+      <details class="mt"><summary class="dim">Cómo agregar una app a tu lista de interés</summary>
+        <p class="dim mt">Con TECHUGC_SECRET cargado en Render (el mismo que usa GitHub Actions), desde una terminal:</p>
+        <pre class="promptbox">curl -X POST "https://TU-SERVIDOR.onrender.com/internal/techugc-watchlist" \\
+  -H "x-techugc-secret: TU_TECHUGC_SECRET" \\
+  -H "content-type: application/json" \\
+  -d '{"name":"Nombre de la app","url":"https://...","nota":"por qué te interesa"}'</pre>
+      </details>
+      ${recentTechUgc.length ? recentTechUgc.map((e) => `
+        <div class="promptcard">
+          <div class="promptmeta"><span class="dim">${esc(e.date)}</span> · ${e.source === 'watchlist' ? 'de tu lista' : 'descubierta por Mentis'}</div>
+          <div class="promptangulo"><strong>${esc(e.appName)}</strong>${e.appUrl ? ` — <a href="${esc(e.appUrl)}" target="_blank">${esc(e.appUrl)}</a>` : ''}</div>
+          ${e.whyInteresting ? `<p class="dim mt">${esc(e.whyInteresting)}</p>` : ''}
+          <details class="mt" open><summary class="dim">Guion del reel (inglés)</summary>
+            <pre class="promptbox">${esc(e.reelScript && e.reelScript.script || '')}</pre>
+            ${e.reelScript && e.reelScript.captionText ? `<p class="dim">Caption: "${esc(e.reelScript.captionText)}"</p>` : ''}
+            ${e.reelScript && e.reelScript.cta ? `<p class="dim">CTA: ${esc(e.reelScript.cta)}</p>` : ''}
+          </details>
+        </div>`).join('') : '<p class="dim mt">Todavía ninguno — corré "Tech UGC diario" desde GitHub Actions para generar el primero.</p>'}
+    </section>`;
+
   const pendingSection = `
     <section>
       <h2>Todavía no construido</h2>
       <p class="dim">De la sección "Estrategia" del plano original, hoy existen las oportunidades de monetización de cara a la audiencia (detectadas por conocimiento) y, por separado, los modelos de negocio para Rodrigo mismo (arriba). Falta la parte basada en rendimiento real — qué ángulo/formato está funcionando mejor en redes, según datos de Metricool — y las mejoras a la herramienta misma; ninguna de las dos se puede construir todavía sin Metricool conectado. El resumen semanal por WhatsApp/panel tampoco existe todavía. Cuando se construyan, suman su parte acá, no reemplazan nada de lo de arriba.</p>
     </section>`;
 
-  return page('Panel personal', guiaCeroSection + guidesSection + contentSection + strategySection + businessModelsSection + statusSection + pendingSection);
+  return page(
+    'Panel personal',
+    guiaCeroSection + guidesSection + contentSection + techUgcSection + strategySection + businessModelsSection + statusSection + pendingSection,
+    panelChatWidget(secret),
+  );
+}
+
+// Chat de Mentis SIN login dentro del panel personal (15/9/2026) — pedido
+// explícito de Rodrigo: "también quiero que mi panel Mentis tenga el chat
+// sin necesidad de login". Reutiliza el mismo widget flotante (botón +
+// ventana) que ya se armó para mentis-pagina-personal.html, pero MÁS simple
+// a propósito: ahí hace falta pedir el email porque cualquier visitante
+// entra a esa página y hay que confirmar que pagó el acceso premium; acá NO
+// — quien abre este link YA es Rodrigo (el candado es el propio
+// PANEL_SECRET de la URL), así que el widget arranca directo en la
+// conversación, sin gate ni localStorage de por medio. Pega contra POST
+// /panel/<secret>/chat (server.js) — misma Mentis, mismo conocimiento, mismas
+// directivas opcionales de gráfico/PDF que el chat premium (chat-render.js).
+function panelChatWidget(secret) {
+  return `
+  <button class="chat-toggle" id="chatToggle" aria-label="Abrir chat con Mentis">💬</button>
+  <div class="mc-widget hidden" id="mcWidget">
+    <div class="mc-head">
+      <span>Mentis</span>
+      <button class="mc-close" id="mcClose" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="mc-messages" id="mcMessages">
+      <div class="mc-msg bot">Hola Rodrigo. Preguntame lo que necesites — puedo traer un gráfico o armarte un PDF si lo pedís.</div>
+    </div>
+    <div class="mc-inputrow">
+      <input type="text" id="mcInput" placeholder="Escribí tu pregunta..." autocomplete="off">
+      <button id="mcSend">Enviar</button>
+    </div>
+  </div>
+  <script>
+  (function(){
+    var secret = ${JSON.stringify(secret)};
+    var toggle = document.getElementById('chatToggle');
+    var widget = document.getElementById('mcWidget');
+    var closeBtn = document.getElementById('mcClose');
+    var messages = document.getElementById('mcMessages');
+    var input = document.getElementById('mcInput');
+    var sendBtn = document.getElementById('mcSend');
+
+    toggle.addEventListener('click', function(){ widget.classList.toggle('hidden'); if(!widget.classList.contains('hidden')) input.focus(); });
+    closeBtn.addEventListener('click', function(){ widget.classList.add('hidden'); });
+
+    function addMsg(text, who){
+      var div = document.createElement('div');
+      div.className = 'mc-msg ' + who;
+      div.textContent = text;
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+      return div;
+    }
+    function addVisual(svg){
+      var wrap = document.createElement('div');
+      wrap.className = 'mc-msg bot mc-visual';
+      wrap.innerHTML = svg;
+      messages.appendChild(wrap);
+      messages.scrollTop = messages.scrollHeight;
+    }
+    function addPdfLink(url){
+      var div = document.createElement('div');
+      div.className = 'mc-msg bot';
+      var a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.textContent = '📄 Descargar PDF';
+      div.appendChild(a);
+      messages.appendChild(div);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    async function send(){
+      var text = input.value.trim();
+      if(!text) return;
+      addMsg(text, 'user');
+      input.value = '';
+      var pending = addMsg('...', 'bot pending');
+      try {
+        var res = await fetch('/panel/' + secret + '/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ message: text }),
+        });
+        var data = await res.json();
+        pending.remove();
+        if(!res.ok){ addMsg(data.error || 'Mentis no pudo responder ahora mismo.', 'bot'); return; }
+        addMsg(data.reply || '(sin respuesta)', 'bot');
+        if(data.visual) addVisual(data.visual);
+        if(data.pdfUrl) addPdfLink(data.pdfUrl);
+      } catch(err) {
+        pending.remove();
+        addMsg('No se pudo conectar con Mentis. Probá de nuevo.', 'bot');
+      }
+    }
+    sendBtn.addEventListener('click', send);
+    input.addEventListener('keydown', function(e){ if(e.key === 'Enter') send(); });
+  })();
+  </script>`;
 }
 
 async function renderGuideContent(secret, id) {
@@ -295,7 +438,42 @@ async function renderGuiaCeroPdf() {
   }
 }
 
-function page(title, body) {
+// PDF de un reel puntual, armado al vuelo desde video-history.json (15/9/2026,
+// pedido explícito de Rodrigo: "que mi panel personal consiga descargar los
+// PDF de los Reels"). No se guarda en ningún lado — se arma cada vez que se
+// pide, con doc-pdf.js (mismo look que las guías). Cubre las dos partes del
+// día en un solo PDF cuando el día tuvo dosPartes (entradas viejas, de antes
+// del 15/9/2026 — ver daily-script.js: no se generan más así, pero las que ya
+// existen siguen viéndose bien acá). Devuelve null si ese día no tiene
+// entrada en el historial, para que la ruta responda 404 en vez de un PDF
+// vacío.
+async function renderReelPdf(date) {
+  const token = await getDropboxAccessToken();
+  const videoHistory = await dropboxDownloadJSON(token, `${CONTENT_FOLDER}/video-history.json`, { entries: [] });
+  const entry = videoHistory.entries.find((e) => e.date === date);
+  if (!entry) return null;
+
+  const parts = Array.isArray(entry.partes) && entry.partes.length ? entry.partes : [entry];
+  const bloques = [];
+  if (entry.angulo) bloques.push({ tipo: 'parrafo', texto: `Ángulo del día: ${entry.angulo}` });
+  parts.forEach((p, i) => {
+    bloques.push({ tipo: 'titulo', texto: parts.length > 1 ? `Parte ${p.parte || i + 1}` : 'Escena / prompt completo' });
+    bloques.push({ tipo: 'parrafo', texto: p.promptCompleto || p.prompt || '(sin prompt guardado para esta parte)' });
+    if (p.captionText) bloques.push({ tipo: 'cita', texto: p.captionText });
+  });
+  if (entry.musicStyle) bloques.push({ tipo: 'parrafo', texto: `Estilo de música: ${entry.musicStyle}` });
+
+  return renderDocPDF({
+    kicker: 'MENTIS',
+    badge: 'REEL',
+    titulo: `Reel del ${date}`,
+    subtitulo: entry.angulo || '',
+    meta: date,
+    bloques,
+  });
+}
+
+function page(title, body, floatingHtml) {
   return `<!doctype html>
 <html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -305,6 +483,21 @@ function page(title, body) {
   *{ box-sizing:border-box; }
   body{ margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; padding:32px 24px 80px; }
   .wrap{ max-width:1100px; margin:0 auto; }
+  .chat-toggle{ position:fixed; right:22px; bottom:22px; width:56px; height:56px; border-radius:50%; border:none; background:var(--accent); color:#06120f; font-size:22px; cursor:pointer; box-shadow:0 6px 20px rgba(0,0,0,.4); z-index:40; }
+  .mc-widget{ position:fixed; right:22px; bottom:90px; width:340px; max-width:calc(100vw - 44px); height:440px; max-height:calc(100vh - 140px); background:var(--card); border:1px solid var(--border); border-radius:14px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 12px 32px rgba(0,0,0,.5); z-index:40; }
+  .mc-widget.hidden{ display:none; }
+  .mc-head{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; background:#0f2a24; font-weight:600; border-bottom:1px solid var(--border); }
+  .mc-close{ background:none; border:none; color:var(--dim); font-size:15px; cursor:pointer; }
+  .mc-messages{ flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:10px; }
+  .mc-msg{ font-size:13.5px; line-height:1.5; padding:9px 11px; border-radius:10px; max-width:88%; white-space:pre-wrap; }
+  .mc-msg.user{ align-self:flex-end; background:var(--accent); color:#06120f; }
+  .mc-msg.bot{ align-self:flex-start; background:#0f2a24; border:1px solid var(--border); }
+  .mc-msg.pending{ color:var(--dim); }
+  .mc-visual{ padding:6px; max-width:100%; }
+  .mc-visual svg{ width:100%; height:auto; display:block; border-radius:8px; }
+  .mc-inputrow{ display:flex; gap:8px; padding:10px; border-top:1px solid var(--border); }
+  .mc-inputrow input{ flex:1; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:9px 10px; color:var(--ink); font-size:13.5px; }
+  .mc-inputrow button{ background:var(--accent); color:#06120f; border:none; border-radius:8px; padding:9px 14px; font-weight:600; cursor:pointer; font-size:13px; }
   h1{ font-size:26px; margin:0 0 4px; }
   .kicker{ font-family:ui-monospace,monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin:0 0 8px; }
   section{ margin-top:34px; padding-top:26px; border-top:1px solid var(--border); }
@@ -334,9 +527,11 @@ function page(title, body) {
   <p class="kicker">MentisOS · panel personal</p>
   <h1>${esc(title)}</h1>
   ${body}
-</div></body></html>`;
+</div>
+${floatingHtml || ''}
+</body></html>`;
 }
 
 module.exports = {
-  renderPanel, renderGuideContent, renderGuidePdf, renderGuiaCeroContent, renderGuiaCeroPdf,
+  renderPanel, renderGuideContent, renderGuidePdf, renderGuiaCeroContent, renderGuiaCeroPdf, renderReelPdf,
 };
