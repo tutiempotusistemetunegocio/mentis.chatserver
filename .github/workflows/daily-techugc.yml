@@ -1,0 +1,54 @@
+name: Tech UGC diario
+
+# Dispara el Tech UGC diario (Módulo 08 → daily-techugc.js) una vez al día,
+# llamando al servidor ya desplegado en Render — mismo patrón que
+# daily-script.yml. Corre 15 minutos después del guion diario (10:30 UTC),
+# para no pisarse con él ni con la lectura diaria (10:00 UTC).
+#
+# Pedido explícito de Rodrigo (15/9/2026): una app de IA distinta cada día,
+# investigada con búsqueda web real, con un guion de reel UGC listo para
+# grabar — ver el comentario grande al principio de daily-techugc.js para el
+# criterio completo (prioriza la watchlist que arma Rodrigo a mano, y si está
+# vacía, Mentis busca sola).
+#
+# Configuración necesaria, una sola vez:
+#  - En Render: cargar TECHUGC_SECRET (un string largo y random, distinto a
+#    todos los demás secretos) y DROPBOX_TECHUGC_FOLDER (opcional — si no se
+#    carga, usa "/mentis-techugc" por default).
+#  - En GitHub (Settings → Secrets and variables → Actions):
+#     - MENTIS_TECHUGC_URL: la URL del servidor + "/internal/daily-techugc"
+#     - MENTIS_TECHUGC_SECRET: el mismo valor que TECHUGC_SECRET en Render
+
+on:
+  schedule:
+    # 10:45 UTC — después de la lectura diaria (10:00) y el guion diario
+    # (10:30), todavía antes de las 7am hora de Rodrigo.
+    - cron: '45 10 * * *'
+  workflow_dispatch: {} # permite dispararlo a mano desde la pestaña "Actions" de GitHub, para probar
+
+jobs:
+  techugc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generar el Tech UGC de hoy
+        run: |
+          # --max-time más largo que el resto (240s, no 180s): esta es la
+          # primera tarea diaria que hace búsqueda web real de por medio
+          # (varias vueltas de ida y vuelta antes de la respuesta final), así
+          # que tarda más que generar texto solo.
+          response=$(curl -s -w "\n%{http_code}" --max-time 240 -X POST "${{ secrets.MENTIS_TECHUGC_URL }}" \
+            -H "x-techugc-secret: ${{ secrets.MENTIS_TECHUGC_SECRET }}" \
+            -H "content-type: application/json")
+          curl_exit=$?
+          if [ "$curl_exit" -ne 0 ]; then
+            echo "El Tech UGC diario falló — no hubo respuesta del servidor a tiempo (curl exit $curl_exit, probablemente un timeout)."
+            exit 1
+          fi
+          body=$(echo "$response" | head -n -1)
+          code=$(echo "$response" | tail -n 1)
+          echo "HTTP $code"
+          echo "$body"
+          if [ "$code" -ge 400 ]; then
+            echo "El Tech UGC diario falló — revisá el mensaje de arriba."
+            exit 1
+          fi
