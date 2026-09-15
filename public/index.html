@@ -67,6 +67,65 @@
   .guia-item .tipo{ font-size:0.66rem; color:var(--accent-core); text-transform:uppercase; letter-spacing:.05em; font-family:'IBM Plex Mono',monospace; }
   .guia-item button{ flex:0 0 auto; background:var(--accent-core); color:#1a1408; border:none; padding:8px 14px; font-weight:600; cursor:pointer; font-size:0.82rem; border-radius:4px; }
   .guia-item button:disabled{ opacity:0.5; cursor:wait; }
+
+  /* --- Cerebro con neuronas brillando (15/9/2026) ------------------------
+     Pedido explícito de Rodrigo: "el chat premium está muy vacío
+     estéticamente, quiero que el chat aparezca como de género de un
+     cerebro que cada vez que envíe información se ilumine, que tenga como
+     neuronas brillando". Reemplaza el punto simple del header por un
+     ícono de cerebro dibujado a mano en SVG (sin ninguna imagen externa,
+     mismo criterio del resto del proyecto) con "neuronas" (círculos) y
+     "sinapsis" (líneas) adentro. Tres estados, controlados por JS con
+     clases CSS:
+       - .idle    → estado normal, un brillo suave tipo "respiración".
+       - .thinking→ mientras se espera la respuesta de Mentis: las
+                    neuronas titilan más rápido y las sinapsis "disparan"
+                    (línea punteada animada), en tono coral para marcar
+                    que está procesando.
+       - .flash   → un destello breve de todo el cerebro apenas llega la
+                    respuesta — el "se ilumine" del pedido — que se saca
+                    solo (animationend) para volver a .idle.
+     Se respeta prefers-reduced-motion apagando las animaciones para quien
+     lo pidió a nivel sistema operativo, dejando solo el brillo fijo. */
+  .brain-wrap{ width:34px; height:26px; flex:0 0 auto; display:flex; align-items:center; }
+  .brain-wrap svg{ width:100%; height:100%; overflow:visible; }
+  .brain-outline{ fill:none; stroke:var(--accent-core); stroke-width:2.2; opacity:0.6; }
+  .brain-bridge{ stroke:var(--accent-core); stroke-width:1.4; opacity:0.4; }
+  .synapse{ stroke:var(--accent-core); stroke-width:1.3; opacity:0.35; fill:none; }
+  .neuron{ fill:var(--accent-core); filter:url(#neuronGlow); }
+
+  #brain.idle .neuron{ animation:neuronBreathe 2.6s ease-in-out infinite; }
+  #brain.idle .neuron:nth-child(odd){ animation-delay:-0.9s; }
+  #brain.idle .neuron:nth-child(3n){ animation-delay:-1.7s; }
+
+  #brain.thinking .brain-outline{ stroke:var(--accent-product); }
+  #brain.thinking .neuron{ fill:var(--accent-product); filter:url(#neuronGlowStrong); animation:neuronFire 0.9s ease-in-out infinite; }
+  #brain.thinking .neuron:nth-child(odd){ animation-delay:-0.3s; }
+  #brain.thinking .neuron:nth-child(3n){ animation-delay:-0.55s; }
+  #brain.thinking .synapse{ stroke:var(--accent-product); stroke-dasharray:4 3; opacity:0.8; animation:synapseTravel 0.6s linear infinite; }
+
+  #brain.flash svg{ animation:brainFlash 0.7s ease-out; }
+
+  @keyframes neuronBreathe{ 0%,100%{ opacity:0.4; transform:scale(1); } 50%{ opacity:1; transform:scale(1.15); } }
+  @keyframes neuronFire{ 0%,100%{ opacity:0.5; transform:scale(1); } 50%{ opacity:1; transform:scale(1.35); } }
+  @keyframes synapseTravel{ 0%{ stroke-dashoffset:14; } 100%{ stroke-dashoffset:0; } }
+  @keyframes brainFlash{ 0%{ filter:brightness(1) drop-shadow(0 0 0 transparent); } 35%{ filter:brightness(2.4) drop-shadow(0 0 6px var(--accent-core)); } 100%{ filter:brightness(1) drop-shadow(0 0 0 transparent); } }
+
+  @media (prefers-reduced-motion: reduce){
+    #brain.idle .neuron, #brain.thinking .neuron, #brain.thinking .synapse, #brain.flash svg{ animation:none !important; }
+    #brain.thinking .neuron{ opacity:0.9; }
+  }
+
+  /* Visuales y PDFs que devuelve el chat (gráficos/infografías generados
+     al vuelo, o un PDF armado para esa respuesta puntual) — antes esto se
+     generaba en el servidor (ver chat-render.js) pero el frontend nunca lo
+     mostraba, solo el texto. "Que sea completo": ahora si la respuesta
+     trae un gráfico SVG o un PDF, se muestran/enlazan igual que el texto. */
+  .msg.bot-visual{ background:var(--paper-raised); border-left:3px solid var(--accent-core); border-radius:2px; padding:10px; }
+  .msg.bot-visual svg{ width:100%; height:auto; display:block; border-radius:6px; }
+  .msg.bot-pdf{ background:var(--paper-raised); border-left:3px solid var(--accent-core); border-radius:2px; }
+  .msg.bot-pdf a{ color:var(--accent-core); font-weight:600; text-decoration:none; }
+  .msg.bot-pdf a:hover{ text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -91,7 +150,43 @@
   </div>
 
   <header>
-    <span class="dot"></span>
+    <span class="brain-wrap">
+      <svg id="brain" class="idle" viewBox="0 0 120 90" role="img" aria-label="Cerebro de Mentis, brillando mientras piensa">
+        <defs>
+          <filter id="neuronGlow" x="-150%" y="-150%" width="400%" height="400%">
+            <feGaussianBlur stdDeviation="1.6" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="neuronGlowStrong" x="-200%" y="-200%" width="500%" height="500%">
+            <feGaussianBlur stdDeviation="2.6" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <path class="brain-outline" d="M60,10 C45,2 25,4 18,18 C10,20 6,32 12,40 C6,48 10,60 20,64 C18,74 30,82 42,80 C48,86 56,86 60,80 C64,86 72,86 78,80 C90,82 102,74 100,64 C110,60 114,48 108,40 C114,32 110,20 102,18 C95,4 75,2 60,10 Z"/>
+        <path class="brain-bridge" d="M60,14 C57,28 63,34 60,45 C57,56 63,62 60,78"/>
+        <g class="synapse">
+          <line x1="30" y1="30" x2="22" y2="45"/>
+          <line x1="22" y1="45" x2="35" y2="55"/>
+          <line x1="35" y1="55" x2="28" y2="65"/>
+          <line x1="30" y1="30" x2="60" y2="45"/>
+          <line x1="35" y1="55" x2="60" y2="45"/>
+          <line x1="90" y1="30" x2="98" y2="45"/>
+          <line x1="98" y1="45" x2="85" y2="55"/>
+          <line x1="85" y1="55" x2="92" y2="65"/>
+          <line x1="90" y1="30" x2="60" y2="45"/>
+          <line x1="85" y1="55" x2="60" y2="45"/>
+        </g>
+        <circle class="neuron" cx="30" cy="30" r="4"/>
+        <circle class="neuron" cx="22" cy="45" r="3.4"/>
+        <circle class="neuron" cx="35" cy="55" r="3.6"/>
+        <circle class="neuron" cx="28" cy="65" r="3.2"/>
+        <circle class="neuron" cx="90" cy="30" r="4"/>
+        <circle class="neuron" cx="98" cy="45" r="3.4"/>
+        <circle class="neuron" cx="85" cy="55" r="3.6"/>
+        <circle class="neuron" cx="92" cy="65" r="3.2"/>
+        <circle class="neuron" cx="60" cy="45" r="4.2"/>
+      </svg>
+    </span>
     <span class="name">Mentis</span>
     <span class="tag">premium</span>
     <span class="mode" id="mode">verificando…</span>
@@ -120,6 +215,25 @@
   const fileInput = document.getElementById('fileInput');
   const fileChip = document.getElementById('fileChip');
   const micBtn = document.getElementById('micBtn');
+  const brain = document.getElementById('brain');
+
+  // Cerebro con neuronas — ver el comentario grande en el <style> de
+  // arriba para el pedido original y el criterio de las 3 clases. Se
+  // controla con esta única función para que nunca queden dos estados
+  // pisándose (ej. "thinking" que nunca se saca porque el fetch falló).
+  function setBrainState(state) {
+    brain.classList.remove('idle', 'thinking', 'flash');
+    brain.classList.add(state);
+  }
+  function flashBrain() {
+    setBrainState('flash');
+    brain.addEventListener('animationend', () => setBrainState('idle'), { once: true });
+    // Si prefers-reduced-motion apagó la animación, 'animationend' nunca
+    // dispara — sin este resguardo el cerebro quedaría trabado en modo
+    // "flash" (que sin animación es un estado sin estilos propios, se ve
+    // como apagado). Vuelve a 'idle' solo, un toque después.
+    setTimeout(() => { if (brain.classList.contains('flash')) setBrainState('idle'); }, 750);
+  }
 
   fetch('/health').then(r => r.json()).then(d => {
     modeLabel.textContent = d.mode === 'live' ? '● en vivo' : '● modo demo';
@@ -137,6 +251,34 @@
     } else {
       div.textContent = text;
     }
+    chat.appendChild(div);
+    div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  // --- Gráficos y PDFs que devuelve el chat (15/9/2026) ------------------
+  // Pedido explícito de Rodrigo: "el chat disponibilice PDF, texto,
+  // diagramas, etc que sea completo". El servidor (ver chat-render.js,
+  // integrado a /chat en server.js) YA arma esto — un gráfico SVG inline
+  // en data.visual, o un link a un PDF armado al vuelo en data.pdfUrl —
+  // pero esta página nunca los mostraba, solo leía data.reply. Mismo
+  // patrón que ya funciona en el chat del panel personal (panel.js,
+  // addVisual/addPdfLink) — adaptado a los colores de esta página.
+  function addVisual(svgString) {
+    const div = document.createElement('div');
+    div.className = 'msg bot bot-visual';
+    div.innerHTML = svgString;
+    chat.appendChild(div);
+    div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+  function addPdfLink(url) {
+    const div = document.createElement('div');
+    div.className = 'msg bot bot-pdf';
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.textContent = '📄 Descargar PDF';
+    div.appendChild(a);
     chat.appendChild(div);
     div.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }
@@ -293,6 +435,7 @@
     pendingFile = null;
     renderFileChip();
 
+    setBrainState('thinking'); // se ilumina/titila más rápido mientras Mentis procesa — pedido explícito de Rodrigo
     try {
       const res = await fetch('/chat', {
         method: 'POST',
@@ -301,12 +444,17 @@
       });
       if (res.status === 401) {
         const data = await res.json().catch(() => ({}));
+        setBrainState('idle');
         handleUnauthorized(data.error);
         return;
       }
       const data = await res.json();
+      flashBrain(); // el destello del cerebro justo cuando llega la respuesta
       addMsg(data.reply || data.error || 'No hubo respuesta.', 'bot');
+      if (data.visual) addVisual(data.visual);
+      if (data.pdfUrl) addPdfLink(data.pdfUrl);
     } catch (err) {
+      setBrainState('idle');
       addMsg('No se pudo conectar con Mentis. Revisá que el servidor esté corriendo.', 'bot');
     } finally {
       input.disabled = false;
