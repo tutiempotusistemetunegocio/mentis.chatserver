@@ -330,7 +330,7 @@
   // manda el archivo codificado en base64 dentro del mismo POST /chat de
   // siempre (un campo más, "archivo"), y el servidor arma el bloque de
   // contenido que corresponda para mandárselo a Claude.
-  const MAX_FILE_MB = 8;
+  const MAX_FILE_MB = 20; // subido de 8 a 20 el 16/9/2026 — ver el comentario sobre CHAT_FILE_MAX_MB en server.js
   let pendingFile = null; // { nombre, tipo, datosBase64 } o null
 
   attachBtn.addEventListener('click', () => fileInput.click());
