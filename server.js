@@ -352,6 +352,73 @@ ${CHART_PDF_INSTRUCTIONS}
 ${knowledge}`;
 }
 
+// --- Leer una página real cuando el cliente pega un link (16/9/2026) --------
+// Pedido explícito de Rodrigo: le pidió a Mentis que analizara su propia
+// página (mentisbyrodrigo.netlify.app) y la respuesta salió inventada — el
+// chat no tenía NINGUNA forma de ver contenido real de internet, solo lo que
+// ya sabe de antes (su base de conocimiento cargada). Esto resuelve ese caso
+// puntual: si el mensaje del cliente trae un link http(s), el servidor
+// descarga esa página (texto plano, sacando <script>/<style>/etiquetas) y se
+// lo pasa a Claude como contexto aparte, ANTES de la pregunta — así responde
+// sobre el contenido real de esa URL, no sobre lo que imagina que diría una
+// página de ese tipo.
+//
+// A propósito NO es una herramienta de búsqueda general (Mentis no puede
+// salir a buscar sola, solo lee el link puntual que el cliente ya pegó en su
+// mensaje) — mucho más simple y confiable que darle una tool de navegación
+// completa (que además necesitaría un feature todavía no probado de la API
+// de Anthropic), y alcanza para el caso real que lo disparó: "mirá mi
+// página y decime qué mejorarías".
+const URL_REGEX = /https?:\/\/[^\s)]+/i;
+
+// Bloquea localhost/IPs privadas/la IP de metadata de nube — defensa básica
+// para no convertir este fetch en una forma de pegarle a la red interna del
+// propio servidor a través de un link que mande el cliente.
+function isUnsafeFetchTarget(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return true;
+    const host = u.hostname.toLowerCase();
+    if (host === 'localhost' || host === '0.0.0.0' || host === '127.0.0.1') return true;
+    if (host === '169.254.169.254') return true;
+    if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+async function fetchPageText(url) {
+  if (isUnsafeFetchTarget(url)) return null;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(8000),
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; MentisBot/1.0; +https://mentisbyrodrigo.netlify.app)' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    let text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<!--[\s\S]*?-->/g, ' ')
+      .replace(/<[^>]+>/g, '\n')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n\s*\n\s*\n+/g, '\n\n')
+      .trim();
+    const LIMIT = 6000; // alcanza de sobra para una landing chica como la de Rodrigo, sin inflar el costo de cada pregunta que traiga un link
+    if (text.length > LIMIT) text = text.slice(0, LIMIT) + '\n[...contenido cortado acá, la página sigue...]';
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 async function callClaude(userMessage, archivo) {
   const { knowledge, usedBlocks, looseBlocks } = pickRelevantKnowledge(userMessage);
   const systemPrompt = buildSystemPrompt(knowledge, looseBlocks);
@@ -360,6 +427,19 @@ async function callClaude(userMessage, archivo) {
   // deja subir sin atrapar acá adentro: quien llama (la ruta /chat) la
   // distingue de un error real de la API y responde 400 en vez de 500.
   const archivoBlocks = archivo ? buildArchivoBlocks(archivo) : null;
+
+  // Se arma ANTES del chequeo de modo demo de abajo a propósito: así, aunque
+  // no haya ANTHROPIC_API_KEY cargada, el mensaje de demo también deja claro
+  // si el link se pudo leer o no, en vez de fingir que esta parte ya
+  // funciona cuando en realidad ni siquiera se intentó.
+  let pageContext = '';
+  const urlMatch = userMessage.match(URL_REGEX);
+  if (urlMatch) {
+    const pageText = process.env.ANTHROPIC_API_KEY ? await fetchPageText(urlMatch[0]) : null;
+    pageContext = pageText
+      ? `--- CONTENIDO REAL DE ${urlMatch[0]} (descargado ahora mismo, texto visible de la página, sin diseño) ---\n${pageText}\n--- FIN DEL CONTENIDO DE ESA PÁGINA ---\n\n`
+      : `[No se pudo descargar ${urlMatch[0]} para leerlo en vivo (podría estar caída, bloquear pedidos automáticos, o no ser una URL alcanzable). Aclará esto en tu respuesta en vez de inventar cómo podría ser esa página.]\n\n`;
+  }
 
   if (!process.env.ANTHROPIC_API_KEY) {
     const looseNote = looseBlocks.length > 0 ? `\nIdeas sueltas de otras áreas: ${looseBlocks.join(', ')}` : '';
@@ -373,11 +453,14 @@ async function callClaude(userMessage, archivo) {
   }
 
   // Sin archivo, el contenido sigue siendo el string de siempre (cero
-  // cambio de comportamiento) — con archivo, se arma como array de
-  // bloques: primero el/los bloque(s) del archivo (imagen/PDF/texto),
-  // después la pregunta del cliente, tal como recomienda Anthropic para
-  // contenido multimodal.
-  const content = archivoBlocks ? [...archivoBlocks, { type: 'text', text: userMessage }] : userMessage;
+  // cambio de comportamiento cuando no hay link ni archivo) — con archivo,
+  // se arma como array de bloques: primero el/los bloque(s) del archivo
+  // (imagen/PDF/texto), después la pregunta del cliente, tal como
+  // recomienda Anthropic para contenido multimodal. `pageContext` (vacío la
+  // gran mayoría de las veces, cuando no hay ningún link en el mensaje) va
+  // siempre ANTES de la pregunta, nunca reemplazándola.
+  const messageText = pageContext + userMessage;
+  const content = archivoBlocks ? [...archivoBlocks, { type: 'text', text: messageText }] : messageText;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
