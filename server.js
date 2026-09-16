@@ -45,7 +45,16 @@ const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 // para no arriesgar la memoria de Render (free tier, 512MB) con un
 // archivo enorme, y para no disparar sin querer el costo/tamaño de una
 // llamada a la API de Claude.
-const CHAT_FILE_MAX_MB = parseFloat(process.env.CHAT_FILE_MAX_MB || '8');
+// Subido de 8 a 20 (16/9/2026) — Rodrigo intentó adjuntar una de sus
+// propias guías en PDF ("Parte 1. Crecer en redes sociales.pdf") para que
+// Mentis la reescribiera y no entró con el techo viejo. 20MB deja margen
+// para un PDF de guía con imágenes sin acercarse al límite real de la API
+// de Claude para documentos (32MB) ni arriesgar los 512MB de RAM del free
+// tier de Render en un uso normal (un archivo a la vez, no muchos en
+// paralelo). Si algún archivo puntual sigue sin entrar, se puede subir
+// más marcando esta misma variable de entorno en Render — no hace falta
+// tocar código para eso.
+const CHAT_FILE_MAX_MB = parseFloat(process.env.CHAT_FILE_MAX_MB || '20');
 // Un archivo en base64 pesa ~4/3 de su tamaño real — el límite se aplica
 // sobre el string base64 tal cual llega, así que se ajusta el techo hacia
 // arriba para que "8MB" siga significando "un archivo real de ~8MB", no

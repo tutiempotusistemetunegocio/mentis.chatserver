@@ -377,7 +377,17 @@ function panelChatWidget(secret) {
     // ya acepta el servidor (server.js, CHAT_ALLOWED_FILE_TYPES). Audio
     // como archivo queda afuera (ver el comentario grande en el <style>,
     // arriba, sobre por qué).
-    var MAX_FILE_MB = 8;
+    // MAX_FILE_MB sale de la MISMA variable de entorno que ya usa el
+    // servidor (CHAT_FILE_MAX_MB, ver server.js) en vez de un número
+    // pegado a mano acá — panelChatWidget() se arma de nuevo en cada
+    // request, así que esto lee el valor real cada vez. Antes estaba
+    // hardcodeado en 8 en los tres chats (acá, public/index.html,
+    // mentis-pagina-personal.html) y quedó desincronizado del límite real
+    // del servidor cuando Rodrigo necesitó subirlo (16/9/2026, PDF de una
+    // guía que no entraba) — acá se corrige de raíz para que no vuelva a
+    // pasar; los otros dos, al ser HTML estático sin backend que los
+    // arme, si hace falta otro techo hay que tocarles el número a mano.
+    var MAX_FILE_MB = ${JSON.stringify(parseFloat(process.env.CHAT_FILE_MAX_MB || '20'))};
     var pendingFile = null; // { nombre, tipo, datosBase64 } o null
 
     attachBtn.addEventListener('click', function(){ fileInput.click(); });
