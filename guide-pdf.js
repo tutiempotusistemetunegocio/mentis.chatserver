@@ -166,12 +166,35 @@ function drawCover(doc, guide) {
 // archivo): 'pasos' (una línea de tiempo vertical numerada, para procesos)
 // y 'destacado' (una caja resaltada para una idea clave), que rompen la
 // pared de texto sin agregar ningún costo de memoria real.
+// BUG REAL confirmado con una guía real (16/9/2026, capturas de Rodrigo:
+// "la guía tiene errores, no está bien" — texto empezando a mitad de página
+// y cortado en el borde derecho). Causa, distinta de los dos bugs de pdfkit
+// ya documentados arriba: pdfkit tiene un cursor interno (`doc.x`/`doc.y`)
+// que cualquier `doc.text(str, x, y, opciones)` con x/y EXPLÍCITOS deja
+// apuntando a esa x/y después de dibujar — no lo devuelve solo al margen
+// izquierdo. Los bloques nuevos ('pasos', 'destacado', 'tabla', 'grafico',
+// 'comparacion') dibujan texto en columnas o cajas con x explícita (por
+// diseño, tienen que hacerlo). El problema era que 'titulo'/'lista'/'cita'/
+// el 'parrafo' de siempre llamaban a `doc.text(str, { width })` SIN x — la
+// forma "implícita", que arranca desde donde haya quedado el cursor. Si el
+// bloque anterior era, por ejemplo, un 'grafico' (que termina su último
+// `doc.text()` bien a la derecha, dibujando el valor al final de la barra),
+// el título/párrafo que viniera después arrancaba desde ESA x —
+// bien adentro de la página, no del margen izquierdo — y con el mismo
+// ancho de columna completo (`contentWidth`) calculado para el margen
+// izquierdo real, el texto se salía por el borde derecho de la hoja.
+//
+// Corrección: TODO texto en esta función ahora pasa x explícita
+// (MARGIN.left, salvo los que ya la tenían distinta a propósito, como cada
+// celda de una tabla o cada columna de una comparación) — nunca más se
+// depende del cursor que haya dejado el bloque anterior. Ya no importa en
+// qué orden vengan los bloques.
 function renderBloque(doc, bloque) {
   const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
   if (bloque.tipo === 'titulo') {
     doc.moveDown(1.0);
     doc.font('Helvetica-Bold').fontSize(18).fillColor(COLOR_TEAL);
-    doc.text(bloque.texto, { width: contentWidth });
+    doc.text(bloque.texto, MARGIN.left, doc.y, { width: contentWidth });
     // Pequeña regla horizontal debajo del título — separa la sección a
     // simple vista, sin depender de que el lector note el cambio de color.
     const ruleY = doc.y + 4;
@@ -180,27 +203,30 @@ function renderBloque(doc, bloque) {
     doc.moveTo(MARGIN.left, ruleY).lineTo(MARGIN.left + 46, ruleY).stroke();
     doc.restore();
     doc.y = ruleY + 10;
+    doc.x = MARGIN.left;
     return;
   }
   if (bloque.tipo === 'lista') {
     doc.moveDown(0.35);
     doc.font('Helvetica').fontSize(13).fillColor(COLOR_INK);
     (bloque.items || []).forEach((item) => {
-      doc.text('•  ' + item, { width: contentWidth, lineGap: 4 });
+      doc.text('•  ' + item, MARGIN.left, doc.y, { width: contentWidth, lineGap: 4 });
       doc.moveDown(0.2);
     });
     doc.moveDown(0.3);
+    doc.x = MARGIN.left;
     return;
   }
   if (bloque.tipo === 'cita') {
     doc.moveDown(0.45);
     doc.font('Helvetica-Oblique').fontSize(13).fillColor(COLOR_AMBER);
-    doc.text('"' + bloque.texto + '"', { width: contentWidth, lineGap: 4 });
+    doc.text('"' + bloque.texto + '"', MARGIN.left, doc.y, { width: contentWidth, lineGap: 4 });
     if (bloque.autor) {
       doc.font('Helvetica').fontSize(10.5).fillColor(COLOR_INK_DIM);
-      doc.text('— ' + bloque.autor + (bloque.obra ? ', ' + bloque.obra : ''), { width: contentWidth });
+      doc.text('— ' + bloque.autor + (bloque.obra ? ', ' + bloque.obra : ''), MARGIN.left, doc.y, { width: contentWidth });
     }
     doc.moveDown(0.45);
+    doc.x = MARGIN.left;
     return;
   }
   // 'pasos' — línea de tiempo vertical numerada (un círculo con el número
@@ -255,6 +281,7 @@ function renderBloque(doc, bloque) {
       doc.y = stepBottom + 16;
     });
     doc.moveDown(0.3);
+    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
     return;
   }
   // 'destacado' — caja resaltada para UNA idea clave (una sola frase corta,
@@ -284,6 +311,7 @@ function renderBloque(doc, bloque) {
     doc.text(text, MARGIN.left + padding, boxY + padding, { width: boxWidth - padding * 2, lineGap: 4 });
     doc.y = boxY + boxHeight + 10;
     doc.moveDown(0.3);
+    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
     return;
   }
   // --- Segunda tanda de bloques visuales (16/9/2026) ------------------------
@@ -368,6 +396,7 @@ function renderBloque(doc, bloque) {
     });
     doc.y = y + 12;
     doc.moveDown(0.3);
+    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
     return;
   }
 
@@ -391,7 +420,7 @@ function renderBloque(doc, bloque) {
 
     if (bloque.titulo) {
       doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_INK);
-      doc.text(bloque.titulo, { width: contentWidth });
+      doc.text(bloque.titulo, MARGIN.left, doc.y, { width: contentWidth });
       doc.moveDown(0.35);
     }
 
@@ -416,6 +445,7 @@ function renderBloque(doc, bloque) {
       doc.y = y2 + barHeight + rowGap;
     });
     doc.moveDown(0.3);
+    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
     return;
   }
 
@@ -470,14 +500,16 @@ function renderBloque(doc, bloque) {
     drawCol(der, MARGIN.left + colWidth + colGap, COLOR_TEAL);
     doc.y = boxY + boxHeight + 14;
     doc.moveDown(0.3);
+    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
     return;
   }
 
   // 'parrafo' y cualquier tipo desconocido caen acá — nunca se pierde texto
   // por un tipo de bloque que no se reconoce.
   doc.font('Helvetica').fontSize(13.5).fillColor(COLOR_INK);
-  doc.text(bloque.texto || '', { width: contentWidth, align: 'left', lineGap: 5 });
+  doc.text(bloque.texto || '', MARGIN.left, doc.y, { width: contentWidth, align: 'left', lineGap: 5 });
   doc.moveDown(0.55);
+  doc.x = MARGIN.left;
 }
 
 // 'Índice visual' (16/9/2026) — página aparte, justo después de la portada,
