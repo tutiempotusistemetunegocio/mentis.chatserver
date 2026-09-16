@@ -286,11 +286,249 @@ function renderBloque(doc, bloque) {
     doc.moveDown(0.3);
     return;
   }
+  // --- Segunda tanda de bloques visuales (16/9/2026) ------------------------
+  // Rodrigo pidió, en su propio mensaje, específicamente "gráficos, tablas,
+  // infografía" — 'pasos'/'destacado' de arriba ya ayudaban, pero seguía
+  // siendo básicamente texto con alguna forma. Estos tres son más fuertes:
+  // una tabla real, un gráfico de barras real, y una comparación de dos
+  // columnas (muy propia del contenido de Rodrigo — "mentalidad de empleado
+  // vs. mentalidad de dueño", "antes vs. después"). Mismo criterio de página
+  // que 'pasos'/'destacado': si no entra, se pasa de hoja entera, nunca se
+  // corta a la mitad de un dibujo.
+  //
+  // Cuidado importante, documentado acá porque no es obvio: un "gráfico" con
+  // números sugiere un dato real y sustentado. El prompt (guia-cero.js /
+  // weekly-guides.js) le prohíbe a Mentis usar estadísticas externas o cifras
+  // de mercado que no puede sustentar — 'grafico' es solo para ilustrar un
+  // punto conceptual PROPIO (ej. "cómo se reparte tu tiempo hoy vs. con el
+  // sistema"), nunca para disfrazar de dato duro algo que no lo es. Acá, del
+  // lado del dibujo, no hay forma de validar eso — es una regla de contenido,
+  // no de render.
+
+  // 'tabla' — {"headers":["...","..."], "filas":[["...","..."],...]}. Pensada
+  // para 2-3 columnas (más que eso, las celdas quedan muy angostas para leer
+  // cómodo en el celular) — el prompt le pide a Mentis respetar ese límite,
+  // pero acá no se lo fuerza (ancho de columna simplemente se reparte parejo
+  // entre las que vengan) para nunca perder una columna de más si el límite
+  // no se respetó.
+  if (bloque.tipo === 'tabla') {
+    doc.moveDown(0.4);
+    const headers = bloque.headers || [];
+    const filas = bloque.filas || [];
+    const cols = headers.length || (filas[0] ? filas[0].length : 0);
+    if (cols === 0) return;
+    const colWidth = contentWidth / cols;
+    const cellPad = 8;
+
+    function cellHeight(text, fontName, fontSize) {
+      doc.font(fontName).fontSize(fontSize);
+      return doc.heightOfString(String(text == null ? '' : text), { width: colWidth - cellPad * 2, lineGap: 2 }) + cellPad * 2;
+    }
+    const headerHeight = Math.max(...headers.map((h) => cellHeight(h, 'Helvetica-Bold', 11)), 26);
+    const rowHeights = filas.map((fila) => Math.max(...fila.map((c) => cellHeight(c, 'Helvetica', 11)), 22));
+
+    // Si ni siquiera entran el encabezado + la primera fila, se pasa la
+    // tabla entera a la hoja siguiente — mejor una tabla completa más abajo
+    // que un encabezado solo, huérfano, al pie de la página.
+    if (doc.y + headerHeight + (rowHeights[0] || 0) > doc.page.height - MARGIN.bottom) {
+      doc.addPage();
+    }
+
+    let y = doc.y;
+    doc.save();
+    doc.fillColor(COLOR_TEAL).rect(MARGIN.left, y, contentWidth, headerHeight).fill();
+    doc.restore();
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(COLOR_BG);
+    headers.forEach((h, i) => {
+      doc.text(String(h), MARGIN.left + i * colWidth + cellPad, y + cellPad, { width: colWidth - cellPad * 2, lineGap: 2 });
+    });
+    y += headerHeight;
+
+    filas.forEach((fila, rIdx) => {
+      const rh = rowHeights[rIdx];
+      // Salto de página POR FILA (no por tabla entera) a partir de acá — es
+      // la misma limitación cosmética honesta que ya tiene 'pasos': el
+      // encabezado no se repite en la página nueva, pero ningún dato se
+      // pierde.
+      if (y + rh > doc.page.height - MARGIN.bottom) {
+        doc.addPage();
+        y = doc.y;
+      }
+      if (rIdx % 2 === 1) {
+        doc.save();
+        doc.fillColor(COLOR_TEAL).fillOpacity(0.08).rect(MARGIN.left, y, contentWidth, rh).fill();
+        doc.fillOpacity(1);
+        doc.restore();
+      }
+      doc.font('Helvetica').fontSize(11).fillColor(COLOR_INK);
+      fila.forEach((c, i) => {
+        doc.text(String(c == null ? '' : c), MARGIN.left + i * colWidth + cellPad, y + cellPad, { width: colWidth - cellPad * 2, lineGap: 2 });
+      });
+      y += rh;
+    });
+    doc.y = y + 12;
+    doc.moveDown(0.3);
+    return;
+  }
+
+  // 'grafico' — {"titulo":"... (opcional)", "categorias":["...","..."],
+  // "valores":[10,20,...], "unidad":"% (opcional)"}. Barras HORIZONTALES a
+  // propósito (no verticales): pdfkit no rota texto fácil, y una barra
+  // horizontal deja usar etiquetas de largo variable sin tener que
+  // inclinarlas. Categorías cortas (2-4 palabras) las pide el prompt, para
+  // que la etiqueta nunca envuelva a dos líneas y desalinee la barra.
+  if (bloque.tipo === 'grafico') {
+    doc.moveDown(0.4);
+    const categorias = bloque.categorias || [];
+    const valores = (bloque.valores || []).map(Number);
+    if (!categorias.length || !valores.length) return;
+    const maxVal = Math.max(...valores, 1);
+    const labelWidth = contentWidth * 0.32;
+    const barAreaX = MARGIN.left + labelWidth;
+    const barAreaWidth = contentWidth - labelWidth - 46;
+    const barHeight = 16;
+    const rowGap = 16;
+
+    if (bloque.titulo) {
+      doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_INK);
+      doc.text(bloque.titulo, { width: contentWidth });
+      doc.moveDown(0.35);
+    }
+
+    categorias.forEach((cat, i) => {
+      if (doc.y + barHeight + rowGap > doc.page.height - MARGIN.bottom) {
+        doc.addPage();
+      }
+      const val = valores[i] || 0;
+      const y2 = doc.y;
+      doc.font('Helvetica').fontSize(10.5).fillColor(COLOR_INK_DIM);
+      doc.text(String(cat), MARGIN.left, y2 + 3, { width: labelWidth - 8, lineGap: 2, lineBreak: false, ellipsis: true });
+      doc.save();
+      doc.fillColor(COLOR_INK_DIM).fillOpacity(0.15).rect(barAreaX, y2, barAreaWidth, barHeight).fill();
+      doc.fillOpacity(1);
+      doc.restore();
+      const w = Math.max(4, (val / maxVal) * barAreaWidth);
+      doc.save();
+      doc.fillColor(COLOR_TEAL).rect(barAreaX, y2, w, barHeight).fill();
+      doc.restore();
+      doc.font('Helvetica-Bold').fontSize(10).fillColor(COLOR_INK);
+      doc.text(`${val}${bloque.unidad || ''}`, barAreaX + barAreaWidth + 6, y2 + 3, { width: 40, lineBreak: false });
+      doc.y = y2 + barHeight + rowGap;
+    });
+    doc.moveDown(0.3);
+    return;
+  }
+
+  // 'comparacion' — {"izquierda":{"titulo":"...", "items":["...","..."]},
+  // "derecha":{"titulo":"...", "items":["...","..."]}}. Dos columnas lado a
+  // lado, izquierda en ámbar (el "antes"/problema) y derecha en teal (el
+  // "después"/solución) — mapea directo al tipo de contraste que ya usa
+  // Rodrigo en su contenido ("mentalidad de empleado" vs "mentalidad de
+  // dueño"). Ambas columnas se miden ANTES de dibujar nada, así la caja sale
+  // pareja (misma altura de las dos) sin importar cuál tenga más texto.
+  if (bloque.tipo === 'comparacion') {
+    doc.moveDown(0.4);
+    const colGap = 16;
+    const colWidth = (contentWidth - colGap) / 2;
+    const izq = bloque.izquierda || {};
+    const der = bloque.derecha || {};
+
+    function colHeight(col) {
+      doc.font('Helvetica-Bold').fontSize(12);
+      let h = doc.heightOfString(col.titulo || '', { width: colWidth - 24 }) + 16;
+      doc.font('Helvetica').fontSize(11);
+      (col.items || []).forEach((item) => {
+        h += doc.heightOfString('•  ' + item, { width: colWidth - 24, lineGap: 3 }) + 6;
+      });
+      return h + 18;
+    }
+    const boxHeight = Math.max(colHeight(izq), colHeight(der));
+
+    if (doc.y + Math.min(boxHeight, 90) > doc.page.height - MARGIN.bottom) {
+      doc.addPage();
+    }
+    const boxY = doc.y;
+
+    function drawCol(col, x, color) {
+      doc.save();
+      doc.fillColor(color).fillOpacity(0.12).roundedRect(x, boxY, colWidth, boxHeight, 8).fill();
+      doc.fillOpacity(1);
+      doc.restore();
+      doc.save();
+      doc.fillColor(color).rect(x, boxY, colWidth, 3).fill();
+      doc.restore();
+      doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_INK);
+      doc.text(col.titulo || '', x + 12, boxY + 16, { width: colWidth - 24 });
+      let cy = doc.y + 8;
+      doc.font('Helvetica').fontSize(11).fillColor(COLOR_INK_DIM);
+      (col.items || []).forEach((item) => {
+        doc.text('•  ' + item, x + 12, cy, { width: colWidth - 24, lineGap: 3 });
+        cy = doc.y + 6;
+      });
+    }
+    drawCol(izq, MARGIN.left, COLOR_AMBER);
+    drawCol(der, MARGIN.left + colWidth + colGap, COLOR_TEAL);
+    doc.y = boxY + boxHeight + 14;
+    doc.moveDown(0.3);
+    return;
+  }
+
   // 'parrafo' y cualquier tipo desconocido caen acá — nunca se pierde texto
   // por un tipo de bloque que no se reconoce.
   doc.font('Helvetica').fontSize(13.5).fillColor(COLOR_INK);
   doc.text(bloque.texto || '', { width: contentWidth, align: 'left', lineGap: 5 });
   doc.moveDown(0.55);
+}
+
+// 'Índice visual' (16/9/2026) — página aparte, justo después de la portada,
+// que lista las secciones de la guía como una línea de tiempo numerada
+// (mismo lenguaje visual que 'pasos' de arriba, pero para el índice
+// completo). Pedido explícito de Rodrigo: quiere la guía "más visual y no
+// tan textual" — esto ataca el problema desde la primera página después de
+// la portada, antes de que el lector vea una sola línea de texto corrido:
+// de un vistazo entiende la estructura completa de lo que va a leer. Se
+// arma SOLO — no hace falta que el prompt genere nada especial para esto —
+// leyendo los bloques "titulo" que Mentis ya devuelve, así que funciona
+// igual para la guía cero como para cualquier guía del catálogo semanal.
+function drawVisualIndex(doc, titulos) {
+  const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
+  doc.font('Helvetica-Bold').fontSize(20).fillColor(COLOR_TEAL);
+  doc.text('En esta guía', MARGIN.left, doc.y, { width: contentWidth });
+  doc.moveDown(1.1);
+
+  const circleR = 13;
+  const circleX = MARGIN.left + circleR;
+  const gap = 16;
+  const textX = circleX + circleR + gap;
+  const textWidth = contentWidth - (circleR * 2 + gap);
+  let prevBottom = null;
+
+  titulos.forEach((t, i) => {
+    if (doc.y + circleR * 2 + 24 > doc.page.height - MARGIN.bottom) {
+      doc.addPage();
+      prevBottom = null;
+    }
+    const stepTop = doc.y;
+    const centerY = stepTop + circleR;
+    if (prevBottom !== null) {
+      doc.save();
+      doc.strokeColor(COLOR_TEAL).opacity(0.35).lineWidth(1.4);
+      doc.moveTo(circleX, prevBottom).lineTo(circleX, centerY - circleR).stroke();
+      doc.restore();
+    }
+    doc.save();
+    doc.fillColor(COLOR_TEAL).circle(circleX, centerY, circleR).fill();
+    doc.restore();
+    doc.save();
+    doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_BG);
+    doc.text(String(i + 1), circleX - circleR, centerY - 6, { width: circleR * 2, align: 'center', lineBreak: false });
+    doc.restore();
+    doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR_INK);
+    doc.text(t, textX, stepTop + 2, { width: textWidth, lineGap: 4 });
+    const stepBottom = Math.max(doc.y, centerY + circleR);
+    prevBottom = centerY + circleR;
+    doc.y = stepBottom + 20;
+  });
 }
 
 // BUG REAL encontrado en la primera corrida en vivo (2/9/2026) — el caveat
@@ -327,6 +565,18 @@ async function renderGuidePDF(guide) {
 
       doc.addPage({ size: 'A4', margins: MARGIN });
       drawPageBackground(doc);
+
+      // Página de índice visual — solo si hay al menos 3 secciones (con
+      // menos, no suma nada y sería una página casi vacía). Si aplica, la
+      // página recién agregada de arriba se usa PARA el índice, y se agrega
+      // una más para arrancar el contenido de verdad; si no aplica, la
+      // página de arriba ES directamente la primera de contenido, cero
+      // cambio de comportamiento para guías cortas.
+      const seccionTitulos = (guide.bloques || []).filter((b) => b.tipo === 'titulo').map((b) => b.texto).filter(Boolean);
+      if (seccionTitulos.length >= 3) {
+        drawVisualIndex(doc, seccionTitulos);
+        doc.addPage({ size: 'A4', margins: MARGIN }); // el fondo lo pinta solo el handler 'pageAdded' de arriba
+      }
 
       (guide.bloques || []).forEach((bloque) => renderBloque(doc, bloque));
 

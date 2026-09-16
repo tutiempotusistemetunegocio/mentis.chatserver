@@ -188,6 +188,30 @@ function bloquesToMarkdown(bloques) {
       // importante" sin la caja de color.
       if (b.tipo === 'pasos') return (b.items || []).map((item, i) => `${i + 1}. ${item}`).join('\n');
       if (b.tipo === 'destacado') return `> **⭐ ${b.texto}**`;
+      // 'tabla', 'grafico' y 'comparacion' (16/9/2026) — mismo agregado que
+      // guia-cero.js, ver el comentario grande en ese archivo.
+      if (b.tipo === 'tabla') {
+        const headers = b.headers || [];
+        const filas = b.filas || [];
+        if (!headers.length) return '';
+        const headerRow = `| ${headers.join(' | ')} |`;
+        const sepRow = `| ${headers.map(() => '---').join(' | ')} |`;
+        const bodyRows = filas.map((fila) => `| ${fila.map((c) => (c == null ? '' : c)).join(' | ')} |`);
+        return [headerRow, sepRow, ...bodyRows].join('\n');
+      }
+      if (b.tipo === 'grafico') {
+        const categorias = b.categorias || [];
+        const valores = b.valores || [];
+        const titulo = b.titulo ? `**${b.titulo}**\n` : '';
+        return titulo + categorias.map((c, i) => `- ${c}: ${valores[i] == null ? '' : valores[i]}${b.unidad || ''}`).join('\n');
+      }
+      if (b.tipo === 'comparacion') {
+        const izq = b.izquierda || {};
+        const der = b.derecha || {};
+        const bloqueIzq = `**${izq.titulo || ''}**\n${(izq.items || []).map((i) => `- ${i}`).join('\n')}`;
+        const bloqueDer = `**${der.titulo || ''}**\n${(der.items || []).map((i) => `- ${i}`).join('\n')}`;
+        return `${bloqueIzq}\n\n${bloqueDer}`;
+      }
       return b.texto || '';
     })
     .join('\n\n');
@@ -200,6 +224,7 @@ const VOICE_RULES = `Reglas fijas que nunca se rompen:
 - Nunca menciones que Rodrigo vive en Miami, y no le des mucho peso a su esposa — sí a su disciplina, su historia (Venezuela → Portugal → Canadá), el valor del tiempo y las ganas de ayudar a otros a salir de la mentalidad de empleado.
 - TEXTO CONDENSADO (agregado 15/9/2026 — feedback real sobre la guía cero, aplica igual acá porque es el mismo PDF/formato): cada bloque "parrafo" corto y escaneable, 2 a 4 oraciones como máximo — nunca un párrafo largo de texto corrido. Si un tema necesita más desarrollo, se parte en varios bloques "parrafo" cortos (o se pasa a "lista"/"pasos") en vez de uno solo denso, sin sacar contenido.
 - USÁ LOS BLOQUES VISUALES ("pasos" y "destacado", ver el formato de bloques más abajo) donde tengan sentido, no solo texto — al menos uno de cada uno por guía.
+- MÁS VISUAL, MENOS TEXTUAL (agregado 16/9/2026 — mismo pedido de Rodrigo que se aplicó primero a la guía cero: "más visual y no tan textual", "gráficos, tablas, infografía"): sumá también, donde tengan sentido real (nunca forzados), "tabla" (2-3 columnas, para comparar cosas), "grafico" (barras horizontales — SOLO para ilustrar un punto conceptual tuyo, nunca una estadística externa ni una cifra que no podés sustentar) y "comparacion" (dos columnas lado a lado, problema/antes vs. solución/después). Usá al menos uno de estos tres por guía, además de "pasos"/"destacado".
 - La guía no es contenido de valor suelto: es parte del embudo de ventas. Usá, a propósito, lo que está cargado sobre neurociencia/psicología de la persuasión, redes sociales y network marketing — combinado con la historia personal de Rodrigo — para generar conexión real con quien la está leyendo. Esa conexión tiene que desembocar siempre en el cierre de venta del final (ver más abajo), nunca quedarse en pura teoría sin ningún objetivo comercial.`;
 
 async function callMentis(prompt, maxTokens) {
@@ -309,6 +334,9 @@ La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: u
 - {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución — la regla de citar siempre que sea texto ajeno palabra por palabra.
 - {"tipo": "pasos", "items": ["...", "..."]} → una secuencia de pasos o un proceso, en orden. Se dibuja como línea de tiempo numerada.
 - {"tipo": "destacado", "texto": "..."} → una sola frase corta con la idea clave de la sección. Se dibuja como caja resaltada.
+- {"tipo": "tabla", "headers": ["...", "..."], "filas": [["...", "..."], ...]} → tabla de 2-3 columnas. Se dibuja como tabla real.
+- {"tipo": "grafico", "titulo": "... (opcional)", "categorias": ["...", "..."], "valores": [numero, ...], "unidad": "... (opcional)"} → barras horizontales. Solo para un punto conceptual tuyo, nunca una estadística inventada (ver regla arriba).
+- {"tipo": "comparacion", "izquierda": {"titulo": "...", "items": ["...", "..."]}, "derecha": {"titulo": "...", "items": ["...", "..."]}} → dos columnas lado a lado.
 
 Los ÚLTIMOS dos bloques del array (después de todo el contenido) tienen que ser el cierre de venta descripto arriba: un "titulo" y un "parrafo".
 
