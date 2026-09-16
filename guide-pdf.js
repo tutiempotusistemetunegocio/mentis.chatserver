@@ -193,7 +193,21 @@ function renderBloque(doc, bloque) {
   const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
   if (bloque.tipo === 'titulo') {
     doc.moveDown(1.0);
-    doc.font('Helvetica-Bold').fontSize(18).fillColor(COLOR_TEAL);
+    doc.font('Helvetica-Bold').fontSize(18);
+    // Chequeo de espacio ANTES de dibujar (mismo patrón que 'pasos' y
+    // 'destacado' más abajo) — bug real visto en producción (16/9/2026,
+    // reportado por Rodrigo con captura): un título de dos líneas arrancaba
+    // pegado al borde inferior de la página y el salto automático de
+    // pdfkit lo partía a la mitad — "3. La mentalidad que separa construir
+    // de solo cambiar" quedaba en una página, "de trabajo" solo y huérfano
+    // arriba de la siguiente. Si el título completo (+ lugar para la
+    // reglita de abajo) no entra entero en lo que queda de la página, se
+    // fuerza el salto ANTES, nunca a mitad de su propio texto.
+    const headingHeight = doc.heightOfString(bloque.texto, { width: contentWidth });
+    if (doc.y + headingHeight + 24 > doc.page.height - MARGIN.bottom) {
+      doc.addPage();
+    }
+    doc.fillColor(COLOR_TEAL);
     doc.text(bloque.texto, MARGIN.left, doc.y, { width: contentWidth });
     // Pequeña regla horizontal debajo del título — separa la sección a
     // simple vista, sin depender de que el lector note el cambio de color.
@@ -417,6 +431,28 @@ function renderBloque(doc, bloque) {
     const barAreaWidth = contentWidth - labelWidth - 46;
     const barHeight = 16;
     const rowGap = 16;
+
+    // Alto total del gráfico (título opcional + todas las barras). Antes el
+    // chequeo de espacio era fila por fila nomás, así que una categoría
+    // "sobrante" podía terminar sola y huérfana arriba de la página
+    // siguiente, con el resto del gráfico atrás en la anterior — no se
+    // pierde ningún dato, pero queda feo (reportado por Rodrigo, 16/9/2026,
+    // con captura de un gráfico de 4 barras partido así). Si el gráfico
+    // completo entra en una página en blanco pero no en lo que queda de la
+    // actual, se fuerza el salto ANTES de dibujar la primera barra, para
+    // que todas queden juntas. Si el gráfico es tan largo que ni una
+    // página en blanco le alcanza, se deja el chequeo fila por fila de
+    // abajo como red de seguridad (nunca se corta una barra a la mitad).
+    let tituloHeight = 0;
+    if (bloque.titulo) {
+      doc.font('Helvetica-Bold').fontSize(12);
+      tituloHeight = doc.heightOfString(bloque.titulo, { width: contentWidth }) + 5;
+    }
+    const chartHeight = tituloHeight + categorias.length * (barHeight + rowGap);
+    const blankPageHeight = doc.page.height - MARGIN.top - MARGIN.bottom;
+    if (doc.y + chartHeight > doc.page.height - MARGIN.bottom && chartHeight <= blankPageHeight) {
+      doc.addPage();
+    }
 
     if (bloque.titulo) {
       doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_INK);
