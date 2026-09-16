@@ -321,7 +321,12 @@ function panelChatWidget(secret) {
     <div class="mc-messages" id="mcMessages">
       <div class="mc-msg bot">Hola Rodrigo. Preguntame lo que necesites — puedo traer un gráfico o armarte un PDF si lo pedís.</div>
     </div>
+    <div class="mc-file-chip hidden" id="mcFileChip"></div>
     <div class="mc-inputrow">
+      <input type="file" id="mcFileInput" hidden
+        accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,text/markdown,text/csv,application/json,.md,.csv">
+      <button type="button" class="mc-icon-btn" id="mcAttachBtn" title="Adjuntar archivo (imagen, PDF o texto)">📎</button>
+      <button type="button" class="mc-icon-btn" id="mcMicBtn" title="Dictar por voz">🎤</button>
       <input type="text" id="mcInput" placeholder="Escribí tu pregunta..." autocomplete="off">
       <button id="mcSend">Enviar</button>
     </div>
@@ -335,6 +340,10 @@ function panelChatWidget(secret) {
     var messages = document.getElementById('mcMessages');
     var input = document.getElementById('mcInput');
     var sendBtn = document.getElementById('mcSend');
+    var attachBtn = document.getElementById('mcAttachBtn');
+    var fileInput = document.getElementById('mcFileInput');
+    var fileChip = document.getElementById('mcFileChip');
+    var micBtn = document.getElementById('mcMicBtn');
 
     toggle.addEventListener('click', function(){ widget.classList.toggle('hidden'); if(!widget.classList.contains('hidden')) input.focus(); });
     closeBtn.addEventListener('click', function(){ widget.classList.add('hidden'); });
@@ -364,17 +373,113 @@ function panelChatWidget(secret) {
       messages.scrollTop = messages.scrollHeight;
     }
 
+    // --- Adjuntar archivo (imagen, PDF o texto) — mismo límite y tipos que
+    // ya acepta el servidor (server.js, CHAT_ALLOWED_FILE_TYPES). Audio
+    // como archivo queda afuera (ver el comentario grande en el <style>,
+    // arriba, sobre por qué).
+    var MAX_FILE_MB = 8;
+    var pendingFile = null; // { nombre, tipo, datosBase64 } o null
+
+    attachBtn.addEventListener('click', function(){ fileInput.click(); });
+
+    fileInput.addEventListener('change', function(){
+      var file = fileInput.files[0];
+      fileInput.value = '';
+      if(!file) return;
+      if(file.size > MAX_FILE_MB * 1024 * 1024){
+        addMsg('"' + file.name + '" pesa más de ' + MAX_FILE_MB + 'MB — no se puede adjuntar.', 'bot');
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function(){
+        var base64 = String(reader.result).split(',')[1] || '';
+        pendingFile = { nombre: file.name, tipo: file.type || 'application/octet-stream', datosBase64: base64 };
+        renderFileChip();
+      };
+      reader.onerror = function(){ addMsg('No se pudo leer "' + file.name + '".', 'bot'); };
+      reader.readAsDataURL(file);
+    });
+
+    function renderFileChip(){
+      fileChip.innerHTML = '';
+      if(!pendingFile){ fileChip.classList.add('hidden'); return; }
+      fileChip.classList.remove('hidden');
+      var span = document.createElement('span');
+      var name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = '📎 ' + pendingFile.nombre;
+      var removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'Quitar archivo';
+      removeBtn.addEventListener('click', function(){ pendingFile = null; renderFileChip(); });
+      span.appendChild(name);
+      span.appendChild(removeBtn);
+      fileChip.appendChild(span);
+    }
+
+    // --- Dictado por voz — mismo patrón que public/index.html y
+    // mentis-pagina-personal.html: Web Speech API, del lado del navegador
+    // nomás, nunca toca el servidor.
+    var SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognitionCtor) {
+      var recognition = new SpeechRecognitionCtor();
+      recognition.lang = 'es-ES';
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      var recognizing = false;
+      var baseText = '';
+
+      recognition.addEventListener('start', function(){
+        recognizing = true;
+        baseText = input.value.trim() ? input.value.trim() + ' ' : '';
+        micBtn.classList.add('active');
+        micBtn.textContent = '⏹';
+        micBtn.title = 'Detener dictado';
+      });
+      recognition.addEventListener('result', function(e){
+        var transcript = '';
+        for (var i = 0; i < e.results.length; i++) transcript += e.results[i][0].transcript;
+        input.value = baseText + transcript;
+      });
+      recognition.addEventListener('end', function(){
+        recognizing = false;
+        micBtn.classList.remove('active');
+        micBtn.textContent = '🎤';
+        micBtn.title = 'Dictar por voz';
+        input.focus();
+      });
+      recognition.addEventListener('error', function(e){
+        recognizing = false;
+        micBtn.classList.remove('active');
+        micBtn.textContent = '🎤';
+        if (e.error !== 'no-speech' && e.error !== 'aborted') {
+          addMsg('No se pudo usar el micrófono (' + e.error + '). Revisá los permisos del navegador.', 'bot');
+        }
+      });
+      micBtn.addEventListener('click', function(){
+        if (recognizing) { recognition.stop(); return; }
+        try { recognition.start(); } catch (err) { /* ya estaba escuchando — se ignora */ }
+      });
+    } else {
+      micBtn.disabled = true;
+      micBtn.title = 'Dictado por voz no disponible en este navegador (probá con Chrome, Edge o Safari)';
+    }
+
     async function send(){
       var text = input.value.trim();
       if(!text) return;
-      addMsg(text, 'user');
+      var archivo = pendingFile;
+      addMsg(text + (archivo ? '\\n📎 ' + archivo.nombre : ''), 'user');
       input.value = '';
+      pendingFile = null;
+      renderFileChip();
       var pending = addMsg('...', 'bot pending');
       try {
         var res = await fetch('/panel/' + secret + '/chat', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify(archivo ? { message: text, archivo: archivo } : { message: text }),
         });
         var data = await res.json();
         pending.remove();
@@ -498,6 +603,26 @@ function page(title, body, floatingHtml) {
   .mc-inputrow{ display:flex; gap:8px; padding:10px; border-top:1px solid var(--border); }
   .mc-inputrow input{ flex:1; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:9px 10px; color:var(--ink); font-size:13.5px; }
   .mc-inputrow button{ background:var(--accent); color:#06120f; border:none; border-radius:8px; padding:9px 14px; font-weight:600; cursor:pointer; font-size:13px; }
+  /* Adjuntar archivo + dictado por voz en el chat del panel (16/9/2026) —
+     mismo pedido de Rodrigo ("que el chat pueda anexar ficheros
+     directamente, fotos, audios, que pueda hablar") aplicado acá también:
+     este widget (panelChatWidget, más abajo) es un chat DISTINTO del de
+     mentis-pagina-personal.html — comparten nombres de clase/id por
+     casualidad, pero viven en documentos separados — así que el agregado
+     de acá no le llegaba al panel solo por haberlo hecho en el otro lado.
+     El backend de /panel/<secret>/chat YA aceptaba "archivo" (server.js,
+     misma func callClaude que usa /chat) — ver el comentario grande sobre
+     audio como archivo en mentis-pagina-personal.html, vale igual acá. */
+  .mc-icon-btn{ flex:0 0 auto; width:38px; background:var(--bg); border:1px solid var(--border); color:var(--ink); border-radius:8px; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; }
+  .mc-icon-btn:hover{ border-color:var(--accent); }
+  .mc-icon-btn.active{ color:#06120f; background:var(--accent); border-color:var(--accent); }
+  .mc-icon-btn:disabled{ opacity:0.35; cursor:not-allowed; }
+  .mc-file-chip{ padding:8px 10px 0; }
+  .mc-file-chip.hidden{ display:none; }
+  .mc-file-chip span{ display:inline-flex; align-items:center; gap:8px; background:var(--bg); border:1px solid var(--accent); color:var(--dim); font-size:12px; padding:5px 10px; border-radius:20px; max-width:100%; }
+  .mc-file-chip span .name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px; }
+  .mc-file-chip button{ background:none; border:none; color:var(--dim); cursor:pointer; font-size:0.85rem; padding:0; line-height:1; flex:0 0 auto; }
+  .mc-file-chip button:hover{ color:var(--amber); }
   h1{ font-size:26px; margin:0 0 4px; }
   .kicker{ font-family:ui-monospace,monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin:0 0 8px; }
   section{ margin-top:34px; padding-top:26px; border-top:1px solid var(--border); }
