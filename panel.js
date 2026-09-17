@@ -390,6 +390,12 @@ function panelChatWidget(secret) {
     var MAX_FILE_MB = ${JSON.stringify(parseFloat(process.env.CHAT_FILE_MAX_MB || '20'))};
     var pendingFile = null; // { nombre, tipo, datosBase64 } o null
 
+    // Historial de la conversación (17/9/2026) — mismo arreglo que
+    // public/index.html: cada pregunta viajaba sola a la API, sin nada de
+    // lo hablado antes, así que Mentis perdía el hilo entre preguntas. Solo
+    // vive en memoria de esta pestaña, nunca en localStorage.
+    var historial = [];
+
     attachBtn.addEventListener('click', function(){ fileInput.click(); });
 
     fileInput.addEventListener('change', function(){
@@ -486,10 +492,12 @@ function panelChatWidget(secret) {
       renderFileChip();
       var pending = addMsg('...', 'bot pending');
       try {
+        var body = { message: text, historial: historial };
+        if (archivo) body.archivo = archivo;
         var res = await fetch('/panel/' + secret + '/chat', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(archivo ? { message: text, archivo: archivo } : { message: text }),
+          body: JSON.stringify(body),
         });
         var data = await res.json();
         pending.remove();
@@ -497,6 +505,10 @@ function panelChatWidget(secret) {
         addMsg(data.reply || '(sin respuesta)', 'bot');
         if(data.visual) addVisual(data.visual);
         if(data.pdfUrl) addPdfLink(data.pdfUrl);
+        if (data.reply) {
+          historial.push({ role: 'user', text: text });
+          historial.push({ role: 'assistant', text: data.reply });
+        }
       } catch(err) {
         pending.remove();
         addMsg('No se pudo conectar con Mentis. Probá de nuevo.', 'bot');

@@ -353,6 +353,10 @@ function buildSystemPrompt(knowledge, looseBlocks) {
     : '';
   return `Eres "Mentis", un sistema totalmente autónomo y automatizado de estrategia de marketing, ventas y organización del tiempo para clientes premium del sistema de Rodrigo. Respondes en español, directo y sistemático, sin frases motivacionales vacías. Das pasos concretos, aplicables ese mismo día. Nunca prometes cifras de ingresos ni resultados garantizados. Estás en constante aprendizaje: todos los días se incorpora experiencia nueva a tu base de conocimiento, y en cada respuesta buscás siempre la opción mejor fundamentada apoyándote en todo lo que sabés, no solo en lo más reciente.
 
+Regla de continuidad (importante): si más abajo, antes de la pregunta de ahora, hay mensajes anteriores de esta misma conversación, son turnos reales que ya pasaron — leelos y respondé la pregunta de ahora dentro de ESE mismo hilo. Si el cliente hace una pregunta corta o ambigua fuera de contexto ("¿y eso cómo lo hago?", "dale, seguí", "¿por qué?"), es casi siempre una continuación de lo que ya venían hablando, no un tema nuevo — respondé sobre eso, nunca cambies de tema por tu cuenta ni te pongas a explicar qué es Mentis o cómo funciona el sistema salvo que el cliente lo pregunte explícitamente. Si de verdad no hay forma de entender a qué se refiere ni con el historial ni con el mensaje, decilo y pedí que lo aclare — no inventes de qué está hablando ni asumas un tema distinto para poder responder algo.
+
+Regla de honestidad: si no tenés información real (ni en tu base de conocimiento, ni en lo que el cliente ya te contó en esta conversación) para responder algo puntual, decilo con claridad — "no tengo esa información" o equivalente — en vez de inventar una respuesta que suene bien. Esto aplica a cualquier dato o afirmación, no solo a estadísticas o fuentes citadas.
+
 A continuación tenés varios bloques de conocimiento, cada uno marcado con su fuente. Cuando la pregunta toca un solo tema, respondé apoyándote en ese bloque. Cuando la pregunta mezcla varios temas a la vez (por ejemplo marketing + multinivel + organización del tiempo, todo en la misma consulta), NO respondas cada tema por separado ni pegues respuestas una detrás de otra: combiná el conocimiento relevante de todos los bloques en una sola respuesta coherente y con profundidad técnica real, como lo haría alguien que domina las áreas a la vez y ve cómo se conectan entre sí. No inventes fuentes ni datos que no estén acá.${looseNote}
 
 Nada de lo que aprendiste se pierde nunca — pero no todo sigue vigente. Si una línea de un bloque empieza con la etiqueta "[desactualizado: ...]", quedó ahí archivada a propósito: no la uses como base de tu respuesta, ignorala igual que ignorarías una nota vieja que ya no aplica. El resto del contenido, sin esa etiqueta, es lo que hoy Mentis considera vigente.
@@ -428,9 +432,38 @@ async function fetchPageText(url) {
   }
 }
 
-async function callClaude(userMessage, archivo) {
+// --- Historial de la conversación (17/9/2026) --------------------------------
+// Hasta acá, cada pregunta al chat viajaba SOLA a la API de Claude — sin el
+// resto de la conversación. Eso es lo que explicaba el bug real que reportó
+// Rodrigo ("responde bien la primera pregunta pero después se le olvida de
+// qué estábamos hablando y se pone a hablar de Mentis"): no es que "se
+// olvide" en el sentido humano, es que literalmente nunca tuvo memoria de
+// ningún turno anterior — cada mensaje era, para la API, la primera y única
+// pregunta de una conversación nueva. Ahora el cliente manda el historial
+// visible de la conversación (lo que ya se ve en pantalla) junto con cada
+// pregunta nueva, y acá se valida/recorta antes de mandarlo a Claude.
+//
+// Se limita a los últimos MAX_HISTORY_MESSAGES mensajes (no todo el
+// historial completo) a propósito: cada bloque de conocimiento ya se manda
+// entero en cada pregunta (ver pickRelevantKnowledge), así que el costo por
+// pregunta ya es alto de por sí — sumarle una conversación sin límite lo
+// haría crecer sin techo. Un puñado de intercambios recientes alcanza de
+// sobra para no perder el hilo de una conversación normal.
+const MAX_HISTORY_MESSAGES = 12; // últimos ~6 intercambios (pregunta + respuesta)
+const MAX_HISTORY_MSG_CHARS = 4000; // por mensaje — corta un pegado gigante en vez de inflar el costo
+
+function sanitizeHistorial(historial) {
+  if (!Array.isArray(historial)) return [];
+  return historial
+    .filter((h) => h && (h.role === 'user' || h.role === 'assistant') && typeof h.text === 'string' && h.text.trim())
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((h) => ({ role: h.role, content: h.text.trim().slice(0, MAX_HISTORY_MSG_CHARS) }));
+}
+
+async function callClaude(userMessage, archivo, historial) {
   const { knowledge, usedBlocks, looseBlocks } = pickRelevantKnowledge(userMessage);
   const systemPrompt = buildSystemPrompt(knowledge, looseBlocks);
+  const historyMessages = sanitizeHistorial(historial);
 
   // Puede tirar ArchivoError (tipo no admitido, archivo muy pesado) — se
   // deja subir sin atrapar acá adentro: quien llama (la ruta /chat) la
@@ -487,7 +520,7 @@ async function callClaude(userMessage, archivo) {
       // la mitad.
       max_tokens: 2000,
       system: systemPrompt,
-      messages: [{ role: 'user', content }],
+      messages: [...historyMessages, { role: 'user', content }],
     }),
   });
 
@@ -1321,7 +1354,7 @@ const server = http.createServer((req, res) => {
       const userMessage = (parsed.message || '').trim();
       if (!userMessage) return sendJSON(res, 400, { error: 'Falta el mensaje.' });
       try {
-        const result = await callClaude(userMessage, parsed.archivo || null);
+        const result = await callClaude(userMessage, parsed.archivo || null, parsed.historial || null);
         // Gráfico y/o PDF opcionales (15/9/2026, ver chat-render.js) — se
         // procesan acá, después de callClaude, porque acá es donde tenemos
         // la URL real del servidor para armar el link de descarga del PDF.
@@ -1402,7 +1435,7 @@ const server = http.createServer((req, res) => {
       const userMessage = (parsed.message || '').trim();
       if (!userMessage) return sendJSON(res, 400, { error: 'Falta el mensaje.' });
       try {
-        const result = await callClaude(userMessage, parsed.archivo || null);
+        const result = await callClaude(userMessage, parsed.archivo || null, parsed.historial || null);
         // eslint-disable-next-line global-require
         const { processChatReply } = require('./chat-render');
         const baseUrl = `https://${req.headers.host}`;
