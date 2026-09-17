@@ -333,6 +333,17 @@
   const MAX_FILE_MB = 20; // subido de 8 a 20 el 16/9/2026 — ver el comentario sobre CHAT_FILE_MAX_MB en server.js
   let pendingFile = null; // { nombre, tipo, datosBase64 } o null
 
+  // --- Historial de la conversación (17/9/2026) --------------------------
+  // Pedido explícito de Rodrigo: Mentis perdía el hilo entre preguntas y se
+  // ponía a hablar de otra cosa. La causa real era que cada pregunta se
+  // mandaba sola a la API, sin nada de lo hablado antes — esto lo arregla
+  // del lado del navegador: guarda cada intercambio (lo que se ve en
+  // pantalla) y lo manda junto con la pregunta nueva. Solo vive en memoria
+  // de esta pestaña — se pierde si se recarga la página, a propósito (nunca
+  // se guarda en localStorage, para no dejar conversaciones de un cliente
+  // guardadas en el disco de otra persona que use la misma computadora).
+  let historial = [];
+
   attachBtn.addEventListener('click', () => fileInput.click());
 
   fileInput.addEventListener('change', () => {
@@ -440,7 +451,7 @@
       const res = await fetch('/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-mentis-email': mentisEmail },
-        body: JSON.stringify(archivo ? { message, archivo } : { message }),
+        body: JSON.stringify({ message, ...(archivo ? { archivo } : {}), historial }),
       });
       if (res.status === 401) {
         const data = await res.json().catch(() => ({}));
@@ -453,6 +464,13 @@
       addMsg(data.reply || data.error || 'No hubo respuesta.', 'bot');
       if (data.visual) addVisual(data.visual);
       if (data.pdfUrl) addPdfLink(data.pdfUrl);
+      // Suma este intercambio al historial recién después de una respuesta
+      // real — si falló (catch de abajo) no se guarda nada, así un error de
+      // red no le hace creer a Mentis que ya contestó algo que nunca mandó.
+      if (data.reply) {
+        historial.push({ role: 'user', text: message });
+        historial.push({ role: 'assistant', text: data.reply });
+      }
     } catch (err) {
       setBrainState('idle');
       addMsg('No se pudo conectar con Mentis. Revisá que el servidor esté corriendo.', 'bot');
