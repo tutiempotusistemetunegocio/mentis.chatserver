@@ -124,6 +124,9 @@ function bloquesToMarkdown(bloques) {
       // importante" aunque no tenga la caja de color.
       if (b.tipo === 'pasos') return (b.items || []).map((item, i) => `${i + 1}. ${item}`).join('\n');
       if (b.tipo === 'destacado') return `> **⭐ ${b.texto}**`;
+      // 'alerta' (27/9/2026) — idéntico a la copia de weekly-guides.js, ver
+      // el comentario grande ahí.
+      if (b.tipo === 'alerta') return `> **🔶 ${b.texto}**`;
       // 'tabla', 'grafico' y 'comparacion' (16/9/2026) — mismos tres bloques
       // nuevos que guide-pdf.js dibuja como tabla/barras/dos-columnas. En
       // texto plano se convierten a su forma markdown más parecida: una
@@ -207,8 +210,10 @@ ${PILARES}
 - Tono directo y sistemático, sin frases motivacionales vacías ni promesas de resultados garantizados.
 - TEXTO CONDENSADO (agregado 15/9/2026 — feedback real: "muy poco atractiva visualmente, difícil de leer en un smartphone"): cada bloque "parrafo" tiene que ser corto y escaneable — 2 a 4 oraciones como máximo, nunca un párrafo largo de "texto corrido" clásico. Si un pilar necesita más desarrollo, se parte en VARIOS bloques "parrafo" cortos (o se pasa a "lista"/"pasos" donde tenga sentido) en vez de un bloque único y denso. El mensaje tiene que quedar igual de completo — se trata de cortarlo en piezas fáciles de leer en un celular, no de sacar contenido.
 - USÁ LOS BLOQUES VISUALES en cada pilar donde tengan sentido, no solo texto:
-  - {"tipo": "pasos", "items": ["...", "..."]} → cuando expliques un proceso o una secuencia de pasos (ej. "cómo funciona el sistema", "así se arranca"), en vez de una "lista" plana. Se dibuja como una línea de tiempo numerada.
-  - {"tipo": "destacado", "texto": "..."} → UNA frase corta (no un párrafo) con la idea más importante de cada pilar — la que alguien se llevaría si solo leyera eso. Se dibuja como una caja resaltada. Usá como mínimo uno por pilar (5 en total), nunca más de dos seguidos.
+  - {"tipo": "pasos", "items": ["...", "..."]} → cuando expliques un proceso o una secuencia de pasos (ej. "cómo funciona el sistema", "así se arranca"), en vez de una "lista" plana. Se dibuja como tarjetas numeradas. Si cada paso tiene un título corto y una explicación, escribilo como "**Título corto:** el resto de la explicación" para que se dibuje con esa jerarquía.
+  - {"tipo": "destacado", "texto": "..."} → UNA frase corta (no un párrafo) con la idea más importante de cada pilar — la que alguien se llevaría si solo leyera eso. Se dibuja como una caja clara resaltada. Usá como mínimo uno por pilar (5 en total), nunca más de dos seguidos. Si necesitás dos frases separadas dentro de la misma caja, separalas con una línea en blanco (\\n\\n).
+  - {"tipo": "alerta", "texto": "..."} → como mucho UNA vez en toda la guía, para el error o malentendido más importante que hay que evitar. Se dibuja como una caja sólida naranja con ícono de alerta — reservala para ese único punto, nunca para contenido normal.
+  - Podés resaltar una frase clave dentro de cualquier "parrafo"/"lista"/"destacado" envolviéndola en **negrita** — con moderación, no el bloque entero.
 - MÁS VISUAL, MENOS TEXTUAL (agregado 16/9/2026 — pedido explícito de Rodrigo: "quiero que la guía cero sea más visual y no tan textual", y después "puedes poner gráficos, tablas, infografía"): además de "pasos"/"destacado" de arriba, tenés estos tres bloques nuevos — usalos donde tengan sentido real, nunca forzados en un pilar donde no encajen:
   - {"tipo": "tabla", "headers": ["...", "..."], "filas": [["...", "..."], ...]} → para comparar cosas en columnas (ej. "mito" vs "realidad", un pilar contra otro). Máximo 2-3 columnas — con más, las celdas quedan angostas para leer en el celular.
   - {"tipo": "grafico", "titulo": "... (opcional)", "categorias": ["...", "..."], "valores": [numero, numero, ...], "unidad": "... (opcional, ej. '%' o 'hs')"} → barras horizontales para ilustrar una comparación de cantidades. REGLA CRÍTICA: es SOLO para ilustrar un punto conceptual TUYO (ej. cómo se reparte el tiempo hoy vs. con el sistema, un reparto de esfuerzo entre pilares) — NUNCA una estadística externa, un porcentaje de estudio, ni ninguna cifra que suene a dato de mercado real que no podés sustentar. Si no tenés un punto conceptual honesto para graficar, no uses este bloque — mejor ningún gráfico que uno con un número inventado.
@@ -217,7 +222,7 @@ ${PILARES}
 - Nunca reveles ni insinúes el mecanismo interno (que esto sale de un sistema con libros cargados) — tiene que sonar a criterio propio y experiencia real de Rodrigo.
 - Si citás una frase textual completa de un autor/libro conocido, atribuila explícitamente (autor y, si aplica, obra) dentro del propio texto — fuera de eso, siempre en tus propias palabras.
 - Adelantate a la objeción más probable de este público ("no tengo tiempo para esto"), resuelta con la propia historia de Rodrigo como prueba: el sistema devuelve tiempo, no suma otra tarea.
-- Cierre de venta OBLIGATORIO como últimos bloques (un "titulo" corto + un "parrafo"): invitá a escribirle directo a Rodrigo para ir más profundo con el sistema completo aplicado a su caso puntual. NUNCA inventes un link, precio o fecha concreta — hoy no existen, y prometerlos sería mentirle a quien lo lee.
+- Cierre de venta OBLIGATORIO como últimos bloques (un "titulo" corto + un "parrafo"): invitá a escribirle directo a Rodrigo para ir más profundo con el sistema completo aplicado a su caso puntual. NUNCA inventes un link, precio o fecha concreta — hoy no existen, y prometerlos sería mentirle a quien lo lee. Ese "parrafo" final se dibuja como una tarjeta de cierre propia — envolvé en **negrita** la frase concreta de la invitación para que resalte en color dentro de la tarjeta.
 - ESTRUCTURA OBLIGATORIA (agregado 6/9/2026 — la primera guía real salió sin títulos que separen los pilares, todo como un bloque de texto corrido): un bloque "titulo" tiene que preceder CADA UNO de los 5 pilares, uno por uno — nunca desarrolles dos pilares seguidos sin un título de por medio que los separe. Sumá también un "titulo" antes de contar la historia de Rodrigo y otro antes del cierre de venta: la guía completa tiene que tener, como mínimo, 7 bloques de tipo "titulo" (historia + 5 pilares + cierre).
 - CADA BLOQUE DE TEXTO TIENE QUE ESTAR COMPLETO (mismo motivo): un bloque "parrafo" o "cita" es una o más oraciones GRAMATICALMENTE TERMINADAS, siempre cerradas con punto, signo de pregunta/exclamación o comillas de cierre. Nunca cortes una idea a la mitad ni termines un bloque en una palabra suelta o una coma. Si una idea necesita más espacio del que entra cómodo en un bloque, cerrá esa oración igual y seguí desarrollándola en el bloque siguiente — nunca la dejes inconclusa.`;
 
@@ -248,7 +253,7 @@ function detectarProblemasDeCalidad(bloques) {
     // 'destacado' (15/9/2026) sumado a este chequeo — es texto corrido igual
     // que 'parrafo'/'cita', solo que se dibuja distinto, así que puede
     // cortarse a mitad de frase de la misma forma.
-    if ((b.tipo === 'parrafo' || b.tipo === 'cita' || b.tipo === 'destacado') && b.texto && b.texto.trim().length > 25 && !terminaciones.test(b.texto.trim())) {
+    if ((b.tipo === 'parrafo' || b.tipo === 'cita' || b.tipo === 'destacado' || b.tipo === 'alerta') && b.texto && b.texto.trim().length > 25 && !terminaciones.test(b.texto.trim())) {
       problemas.push(`Bloque #${i + 1} (${b.tipo}) parece cortado a mitad de frase: "...${b.texto.trim().slice(-60)}"`);
     }
   });
@@ -264,11 +269,12 @@ Basate en todo el conocimiento cargado más abajo para dar profundidad real a ca
 
 La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: un PDF con diseño y un texto plano. Para que ambos salgan iguales, devolvé el contenido dividido en "bloques" — cada uno un párrafo, un título de sección, una lista o una cita, en el orden en que van apareciendo:
 - {"tipo": "titulo", "texto": "..."} → encabezado de una sección dentro de la guía (no el título general, eso va aparte).
-- {"tipo": "parrafo", "texto": "..."} → texto corrido normal, corto (ver regla de texto condensado arriba).
+- {"tipo": "parrafo", "texto": "..."} → texto corrido normal, corto (ver regla de texto condensado arriba). Podés envolver la frase clave en **negrita** (con moderación).
 - {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos sin orden ni secuencia.
-- {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución.
-- {"tipo": "pasos", "items": ["...", "..."]} → una secuencia de pasos o un proceso, en orden. Se dibuja como línea de tiempo numerada.
-- {"tipo": "destacado", "texto": "..."} → una sola frase corta con la idea clave de la sección. Se dibuja como caja resaltada.
+- {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución. Se dibuja como tarjeta oscura destacada.
+- {"tipo": "pasos", "items": ["...", "..."]} → una secuencia de pasos o un proceso, en orden. Se dibuja como tarjetas numeradas — usá "**Título corto:** explicación" en cada item si hace falta esa jerarquía.
+- {"tipo": "destacado", "texto": "..."} → una sola frase corta con la idea clave de la sección. Se dibuja como caja clara resaltada.
+- {"tipo": "alerta", "texto": "..."} → como mucho una vez en toda la guía, para el punto más importante a evitar. Se dibuja como caja sólida naranja.
 - {"tipo": "tabla", "headers": ["...", "..."], "filas": [["...", "..."], ...]} → tabla de 2-3 columnas. Se dibuja como tabla real.
 - {"tipo": "grafico", "titulo": "... (opcional)", "categorias": ["...", "..."], "valores": [numero, ...], "unidad": "... (opcional)"} → barras horizontales. Solo para un punto conceptual tuyo, nunca una estadística inventada (ver regla arriba).
 - {"tipo": "comparacion", "izquierda": {"titulo": "...", "items": ["...", "..."]}, "derecha": {"titulo": "...", "items": ["...", "..."]}} → dos columnas lado a lado.

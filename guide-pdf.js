@@ -1,358 +1,536 @@
-// Módulo 02 → PDF de cada guía, con la identidad visual del sistema (la
-// misma que ya usan la página personal y el chat premium: fondo azul marino
-// oscuro, acentos en teal y ámbar — ver plano-del-cerebro.html, sección
-// "Identidad visual"). Pedido de Rodrigo (2/9/2026): que cada guía tenga una
-// estructura y un diseño definidos, no texto suelto.
+// Módulo 02 → PDF de cada guía, con la identidad visual del sistema.
 //
-// Decisión técnica, explicada para que quede claro por qué: se usa
-// `pdfkit` (JS puro, arma el PDF programáticamente) en vez de un navegador
-// headless (Puppeteer/Playwright) para convertir HTML a PDF. Un navegador
-// headless da más libertad de diseño, pero consume mucha más memoria — y el
-// servidor de Render (free tier, 512MB) ya se quedó sin memoria una vez esta
-// semana con una tarea más liviana que esta (ver daily-media.md). pdfkit no
-// levanta ningún navegador, así que el costo de memoria de armar un PDF acá
-// es chico y predecible, aunque el control de diseño sea más manual.
+// REDISEÑO COMPLETO (27/9/2026) — pedido explícito de Rodrigo: subió un PDF
+// de referencia ("Cómo automatizar tu negocio sin perder el control",
+// hecho aparte con Python/ReportLab + tipografía Poppins embebida) y pidió
+// "reactualiza las guías todas, mantiene el padrón, los colores, la parte
+// gráfica, la formatación de los párrafos". Este archivo reconstruye ESE
+// patrón visual — páginas de contenido en blanco (antes eran azul marino
+// entero), barra superior azul marino con la marca, tarjetas redondeadas en
+// crema/menta/gris muy claro, acentos en teal y naranja, tipografía Poppins
+// real — pero sigue armando el PDF con `pdfkit` (JS puro), nunca con un
+// navegador headless: la razón de memoria que ya explicaba esto (Render
+// free tier, 512MB, se quedó sin memoria una vez con algo más liviano que
+// esto — ver daily-media.md) sigue siendo válida, y pdfkit soporta
+// embeber una fuente TTF real sin levantar ningún navegador, así que se
+// pudo sumar la tipografía real (carpeta fonts/, ~800KB en total, costo de
+// memoria trivial) sin tener que resignar la arquitectura liviana.
 //
-// Tipografía: se usan las fuentes que trae pdfkit por default (familia
-// Helvetica) en vez de embeber IBM Plex Sans (la fuente real de la
-// identidad visual) — así no depende de que un archivo de fuente externo
-// llegue bien al deploy. Es un ajuste pendiente si Rodrigo quiere que
-// coincida exactamente con la tipografía de la página personal; hoy prioriza
-// que funcione siempre por sobre que coincida al pixel.
+// Los colores de acá se sacaron muestreando el PDF de referencia en
+// pixeles reales (no "a ojo"), para que coincidan de verdad:
+//   navy #0b1f3a · teal #2ec5b6 · naranja #f2a35f · crema #fdf1e5 ·
+//   menta #e3f7f5 · tarjeta gris #f3f7fa
 //
 // renderGuidePDF(guide) devuelve una Promise<Buffer> con el PDF completo.
-// Si algo falla acá, quien llama (weekly-guides.js) lo atrapa y sigue
-// adelante igual con el archivo .md — un PDF que no se pudo armar nunca
-// tiene que tirar abajo la guía en sí.
+// Si algo falla acá, quien llama (weekly-guides.js / guia-cero.js) lo
+// atrapa y sigue adelante igual con el archivo .md — un PDF que no se pudo
+// armar nunca tiene que tirar abajo la guía en sí. Ese contrato NO cambió.
 
+const path = require('path');
 const PDFDocument = require('pdfkit');
 
-const COLOR_BG = '#0a1f38';
-const COLOR_BG_DEEP = '#081a30';
-const COLOR_INK = '#eaf2fa';
-const COLOR_INK_DIM = '#8fabc4';
-const COLOR_TEAL = '#5fd4c4';
-const COLOR_AMBER = '#f2a65a';
+// ---------------------------------------------------------------------------
+// Paleta — ver el comentario grande de arriba sobre de dónde salió cada hex.
+// ---------------------------------------------------------------------------
+const COLOR_NAVY = '#0b1f3a'; // fondo de portada, barra superior, tarjetas oscuras (cita, cierre)
+const COLOR_TEAL = '#2ec5b6';
+const COLOR_ORANGE = '#f2a35f';
+const COLOR_CREAM = '#fdf1e5'; // caja clara para "esto NO / el problema"
+const COLOR_MINT = '#e3f7f5'; // caja clara para "esto SÍ / la solución"
+const COLOR_CARD = '#f3f7fa'; // tarjeta neutra clara (listas numeradas, tabla)
+const COLOR_WHITE = '#ffffff';
+const COLOR_INK = '#152238'; // texto de títulos sobre fondo blanco
+const COLOR_INK_SOFT = '#38465a'; // texto de párrafo sobre fondo blanco
+const COLOR_INK_DIM = '#7c8aa0'; // texto secundario sobre fondo blanco (pie de página)
+const COLOR_ON_NAVY = '#eef4fa'; // texto principal sobre fondo navy
+const COLOR_ON_NAVY_DIM = '#93aec8'; // texto secundario sobre fondo navy
 
-// Márgenes achicados de 60 a 50 (15/9/2026, rediseño de legibilidad —
-// ver el comentario grande más abajo, antes de renderBloque): un poco más
-// de ancho de columna para compensar el cuerpo de texto más grande, sin
-// tocar para nada el resto de las cuentas de la portada/pie de página, que
-// ya usan MARGIN dinámicamente (nunca un número pegado a A4 a mano).
-const MARGIN = { top: 76, bottom: 64, left: 50, right: 50 };
+// Márgenes: MARGIN.top deja lugar debajo de la barra superior azul marino
+// (HEADER_H) más un respiro; MARGIN.bottom deja lugar para el pie de
+// página. Nunca un número pegado a A4 a mano en el resto del archivo — todo
+// sale de estas dos constantes.
+const HEADER_H = 60;
+const MARGIN = {
+  top: HEADER_H + 40, bottom: 70, left: 50, right: 50,
+};
 
-// BUG REAL confirmado con guías reales (6/9/2026): texto que desaparecía
-// exactamente en los quiebres de página automáticos, en toda la guía (no un
-// caso aislado — Rodrigo lo confirmó: "hay errores así por toda la guía").
-// Se verificó la causa contra el código fuente real de pdfkit (no se pudo
-// instalar pdfkit en este entorno para probarlo corriendo, así que se leyó
-// el código de la librería para confirmarlo en vez de adivinar):
+// ---------------------------------------------------------------------------
+// Tipografía — Poppins real, embebida desde fonts/*.ttf (bajada de
+// google/fonts, licencia OFL). Si por lo que sea los archivos no están en
+// el deploy (ej. alguien los borró sin querer), esto NUNCA tira abajo el
+// PDF entero: se cae a Helvetica y sigue. `F` es el mapa de nombres de
+// fuente que usa TODO el resto del archivo — nunca un 'Helvetica-Bold' o
+// 'Poppins-Bold' sueltos más abajo, siempre a través de F, así el
+// fallback funciona en un solo lugar.
+const FONT_DIR = path.join(__dirname, 'fonts');
+function registerFonts(doc) {
+  try {
+    doc.registerFont('Poppins', path.join(FONT_DIR, 'Poppins-Regular.ttf'));
+    doc.registerFont('Poppins-Light', path.join(FONT_DIR, 'Poppins-Light.ttf'));
+    doc.registerFont('Poppins-Medium', path.join(FONT_DIR, 'Poppins-Medium.ttf'));
+    doc.registerFont('Poppins-SemiBold', path.join(FONT_DIR, 'Poppins-SemiBold.ttf'));
+    doc.registerFont('Poppins-Bold', path.join(FONT_DIR, 'Poppins-Bold.ttf'));
+    return {
+      reg: 'Poppins', light: 'Poppins-Light', med: 'Poppins-Medium', semi: 'Poppins-SemiBold', bold: 'Poppins-Bold',
+    };
+  } catch (err) {
+    console.error('No se pudieron cargar las fuentes Poppins (carpeta fonts/) — se arma el PDF con Helvetica:', err.message);
+    return {
+      reg: 'Helvetica', light: 'Helvetica', med: 'Helvetica', semi: 'Helvetica-Bold', bold: 'Helvetica-Bold',
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Texto enriquecido: **negrita** dentro de cualquier bloque de texto.
+// La guía de referencia de Rodrigo resalta frases clave adentro de un
+// párrafo corrido ("que si tu negocio depende **100% de ti**") — esto no
+// existía antes (todo bloque de texto era un solo estilo parejo). Se
+// implementa con la API "continued" de pdfkit: se corta el texto en tramos
+// por el delimitador **, y cada tramo se dibuja con su propia
+// fuente/color, todos encadenados en la misma tirada para que el ajuste de
+// línea (word-wrap) los trate como un solo párrafo.
 //
-// `doc.fill(color)` (acá, `.fill(COLOR_BG)`) llama por dentro a
-// `doc.fillColor(color)`, que guarda el color en `doc._fillColor` — una
-// propiedad de JS común y corriente, SEPARADA del verdadero estado gráfico
-// de PDF que manejan `doc.save()`/`doc.restore()` (esos dos solo apilan la
-// matriz de transformación y emiten los operadores "q"/"Q" — nunca tocan
-// `_fillColor`). O sea: el `save()`/`restore()` de acá abajo no protege para
-// nada el color de relleno.
+// Importante (mismo motivo que el comentario grande sobre el cursor de
+// pdfkit, más abajo): SOLO el primer tramo lleva x/y/width explícitos —
+// los siguientes continúan exactamente donde quedó el anterior, a
+// propósito, nunca repiten posición.
+function drawRichText(doc, text, opts) {
+  const {
+    x, y, width, font, boldFont, size, color, boldColor, lineGap = 4, align = 'left',
+  } = opts;
+  const parts = String(text == null ? '' : text).split(/(\*\*[^*]+\*\*)/g).filter((p) => p !== '');
+  if (parts.length === 0) return;
+  parts.forEach((part, i) => {
+    const isBold = part.startsWith('**') && part.endsWith('**');
+    const runText = isBold ? part.slice(2, -2) : part;
+    doc.font(isBold ? boldFont : font).fontSize(size).fillColor(isBold ? (boldColor || color) : color);
+    const isLast = i === parts.length - 1;
+    if (i === 0) {
+      doc.text(runText, x, y, { width, lineGap, align, continued: !isLast });
+    } else {
+      doc.text(runText, { continued: !isLast });
+    }
+  });
+}
+
+// Altura aproximada de un texto enriquecido, para los chequeos de "¿entra
+// en lo que queda de la página?" que ya usa todo el resto del archivo. No
+// hay forma barata de medir un párrafo multi-estilo exacto en pdfkit, así
+// que se mide el texto plano (sin los **) con el tamaño pedido — negrita y
+// regular de Poppins al mismo tamaño ocupan prácticamente lo mismo, así que
+// alcanza de sobra para decidir si hace falta saltar de página.
+function richTextHeight(doc, text, font, size, width, lineGap = 4) {
+  const plain = String(text == null ? '' : text).replace(/\*\*/g, '');
+  doc.font(font).fontSize(size);
+  return doc.heightOfString(plain, { width, lineGap });
+}
+
+// ---------------------------------------------------------------------------
+// BUG REAL confirmado con guías reales (6/9/2026, sigue aplicando igual con
+// el rediseño): `doc.fill(color)` guarda el color en `doc._fillColor`, una
+// propiedad de JS separada del estado gráfico real de PDF que manejan
+// `doc.save()`/`doc.restore()` — esos dos nunca tocan `_fillColor`. Cuando
+// pdfkit agrega una página sola (desborde de texto), su propia lógica de
+// salto "restaura" el color de relleno DESPUÉS de que el evento
+// 'pageAdded' ya corrió — si acá adentro se pintó el fondo sin devolver
+// `_fillColor` a mano, el texto que sigue queda escrito invisible (mismo
+// color que el fondo). Por eso este handler SIEMPRE guarda y devuelve
+// `_fillColor` a mano.
 //
-// ¿Por qué importa? Cuando un párrafo largo no entra en una página, pdfkit
-// agrega una página nueva solo (evento 'pageAdded', el mismo que dispara
-// esta función) y, en su propia lógica de ese salto (`nextSection()` en
-// line_wrapper.js, parte del código fuente de pdfkit), hace exactamente
-// esto para que el texto que sigue no cambie de color al pasar de página:
-// `if (doc._fillColor) doc.fillColor(...doc._fillColor)`. El problema es el
-// ORDEN: ese chequeo corre DESPUÉS de que ya se disparó 'pageAdded' — es
-// decir, después de que esta función ya pisó `doc._fillColor` con
-// [COLOR_BG, undefined]. Entonces pdfkit "restaura" el color del texto
-// siguiente al color de FONDO, no al color real que tenía (COLOR_INK,
-// COLOR_TEAL o COLOR_AMBER según el bloque). El texto sigue estando ahí,
-// en el lugar correcto — pero queda escrito en el mismo color que el fondo,
-// invisible a simple vista. Eso explica perfecto lo que reportó Rodrigo:
-// una frase que se corta justo en el borde de la página y la continuación
-// "no aparece en ningún lado" del PDF — no falta, está invisible.
-//
-// Corrección: guardar `doc._fillColor` antes de pintar el fondo y
-// devolverlo después, a mano, porque `save()`/`restore()` no lo hace.
+// Ahora, además del rectángulo de fondo, pinta la barra superior azul
+// marino (HEADER_H) — sigue siendo SOLO formas, nunca texto acá (ver el
+// comentario grande de más abajo sobre por qué el texto del header/pie de
+// página se dibuja en un segundo paso, después de que termina toda la
+// paginación automática).
 function drawPageBackground(doc) {
   const previousFillColor = doc._fillColor;
   doc.save();
-  doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLOR_BG);
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLOR_WHITE);
+  doc.rect(0, 0, doc.page.width, HEADER_H).fill(COLOR_NAVY);
   doc.restore();
   doc._fillColor = previousFillColor;
 }
 
-// BUG REAL encontrado con guías reales (3/9/2026): las guías premium (con
-// más páginas después de subirles el margen de tokens) aparecían con varias
-// páginas en blanco de más. Causa: este pie de página se dibuja a propósito
-// DENTRO del margen inferior de la página (MARGIN.bottom = 64, y este texto
-// va en height-40 — más abajo del límite de contenido normal). pdfkit, antes
-// de dibujar cualquier texto con `width` definido, chequea si entra dentro
-// del límite de contenido (altura de la página menos el margen inferior) —
-// como el pie de página cae fuera de ese límite a propósito, pdfkit asume
-// que "no entra" y agrega una página nueva en blanco ahí mismo antes de
-// dibujarlo, en vez de dibujarlo en la página que le pedimos con
-// `switchToPage`. Eso pasaba una vez por cada página de contenido (achica
-// el margen inferior a 0 temporalmente, solo mientras se dibuja el pie de
-// página, así pdfkit deja de pensar que se sale de la hoja — se restaura
-// enseguida después, para no afectar nada más del layout de esa página).
-function drawFooter(doc, pageLabel) {
+// Texto de la barra superior (marca "MENTIS" + "CHAT") — se dibuja en el
+// mismo paso seguro que el pie de página (después de toda la paginación
+// automática, nunca dentro de 'pageAdded'), salvo en la portada, donde se
+// dibuja directo porque ahí no hay ningún evento de paginación en curso.
+function drawHeaderText(doc, F) {
+  doc.save();
+  doc.font(F.bold).fontSize(12).fillColor(COLOR_TEAL);
+  doc.text('MENTIS', MARGIN.left, HEADER_H / 2 - 7, { characterSpacing: 2, lineBreak: false });
+  doc.font(F.semi).fontSize(10).fillColor(COLOR_ORANGE);
+  doc.text('CHAT', 0, HEADER_H / 2 - 5, {
+    width: doc.page.width - MARGIN.right, align: 'right', characterSpacing: 1, lineBreak: false,
+  });
+  doc.restore();
+}
+
+// BUG REAL encontrado con guías reales (3/9/2026, sigue aplicando): el pie
+// de página se dibuja a propósito DENTRO del margen inferior — pdfkit, si
+// el margen inferior real sigue puesto, asume que no entra y agrega una
+// página en blanco de más antes de dibujarlo. Se achica el margen inferior
+// a 0 solo mientras se dibuja, y se restaura enseguida.
+function drawFooter(doc, F, pageLabel, footerTitle) {
   const originalBottomMargin = doc.page.margins.bottom;
   doc.page.margins.bottom = 0;
   doc.save();
-  doc.font('Helvetica').fontSize(8.5).fillColor(COLOR_INK_DIM);
-  doc.text('MENTIS', MARGIN.left, doc.page.height - 40, { width: 200, align: 'left', lineBreak: false });
+  doc.strokeColor(COLOR_INK_DIM).opacity(0.35).lineWidth(1);
+  doc.moveTo(MARGIN.left, doc.page.height - 56).lineTo(doc.page.width - MARGIN.right, doc.page.height - 56).stroke();
+  doc.opacity(1);
+  doc.font(F.reg).fontSize(8.5).fillColor(COLOR_INK_DIM);
+  doc.text(footerTitle || 'MENTIS', MARGIN.left, doc.page.height - 40, {
+    width: doc.page.width - MARGIN.left - MARGIN.right - 60, align: 'left', lineBreak: false, ellipsis: true,
+  });
   doc.text(pageLabel, 0, doc.page.height - 40, { width: doc.page.width - MARGIN.right, align: 'right', lineBreak: false });
   doc.restore();
   doc.page.margins.bottom = originalBottomMargin;
 }
 
-function drawCover(doc, guide) {
-  drawPageBackground(doc);
-
-  // franja inferior más oscura, puramente decorativa, para dar profundidad
+// ---------------------------------------------------------------------------
+// Portada — maquetación libre sobre fondo navy entero, como en la guía de
+// referencia: círculos decorativos arriba a la derecha, chip con el tipo de
+// guía, título grande con las últimas palabras resaltadas en teal, filete
+// naranja, subtítulo, categorías + fecha al pie.
+function drawCover(doc, guide, F) {
+  const previousFillColor = doc._fillColor;
   doc.save();
-  doc.rect(0, doc.page.height - 160, doc.page.width, 160).fill(COLOR_BG_DEEP);
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill(COLOR_NAVY);
+  doc.restore();
+  doc._fillColor = previousFillColor;
+
+  // Círculos decorativos — puramente de ambientación, mismo lenguaje visual
+  // que la referencia (dos círculos teal semitransparentes, arriba a la
+  // derecha, que se salen del borde de la hoja sin problema).
+  doc.save();
+  doc.fillColor(COLOR_TEAL).fillOpacity(0.10).circle(doc.page.width - 60, 40, 230).fill();
+  doc.fillOpacity(0.16).circle(doc.page.width + 10, 160, 160).fill();
+  doc.fillOpacity(1);
   doc.restore();
 
-  doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR_TEAL);
-  doc.text('MENTIS', MARGIN.left, 64, { characterSpacing: 2 });
+  drawHeaderText(doc, F);
 
-  // 'sistema' es la guía cero (guia-cero.js, 6/9/2026) — la referencia fija
-  // del sistema completo, distinta del catálogo rotativo de gratis/premium.
-  // No se vende por separado, así que comparte el color teal de "gratis",
-  // pero con su propio texto para que se distinga a simple vista en el panel.
   const badgeText = guide.tipo === 'premium' ? 'GUÍA PREMIUM' : guide.tipo === 'sistema' ? 'GUÍA DEL SISTEMA' : 'GUÍA GRATIS';
-  const badgeColor = guide.tipo === 'premium' ? COLOR_AMBER : COLOR_TEAL;
-  doc.font('Helvetica-Bold').fontSize(9).fillColor(badgeColor);
-  doc.text(badgeText, 0, 66, { width: doc.page.width - MARGIN.right, align: 'right', characterSpacing: 1 });
+  const badgeColor = guide.tipo === 'premium' ? COLOR_ORANGE : COLOR_TEAL;
+  doc.font(F.semi).fontSize(9);
+  const badgePaddingX = 16;
+  const badgeWidth = doc.widthOfString(badgeText, { characterSpacing: 0.5 }) + badgePaddingX * 2;
+  const badgeY = 210;
+  doc.save();
+  doc.fillColor(badgeColor).roundedRect(MARGIN.left, badgeY, badgeWidth, 30, 15).fill();
+  doc.restore();
+  doc.fillColor(COLOR_NAVY);
+  doc.text(badgeText, MARGIN.left, badgeY + 10, { width: badgeWidth, align: 'center', characterSpacing: 0.5, lineBreak: false });
 
-  doc.font('Helvetica-Bold').fontSize(30).fillColor(COLOR_INK);
-  doc.text(guide.titulo, MARGIN.left, 220, { width: doc.page.width - MARGIN.left - MARGIN.right, align: 'left' });
-
-  if (guide.subtitulo) {
-    doc.moveDown(0.6);
-    doc.font('Helvetica').fontSize(13).fillColor(COLOR_INK_DIM);
-    doc.text(guide.subtitulo, MARGIN.left, doc.y, { width: doc.page.width - MARGIN.left - MARGIN.right });
+  // Título — últimas palabras resaltadas en teal (mismo efecto que
+  // "sin perder el control" en la referencia). Heurística simple: con 5+
+  // palabras resalta las últimas 3, con 3-4 resalta las últimas 2, con
+  // menos de 3 no resalta nada (un título muy corto entero en teal se ve
+  // raro, no aporta jerarquía).
+  const titleY = badgeY + 58;
+  const titleWidth = doc.page.width - MARGIN.left - MARGIN.right;
+  const words = String(guide.titulo || '').trim().split(/\s+/).filter(Boolean);
+  let splitAt = words.length;
+  if (words.length >= 5) splitAt = words.length - 3;
+  else if (words.length >= 3) splitAt = words.length - 2;
+  const plainPart = words.slice(0, splitAt).join(' ');
+  const accentPart = words.slice(splitAt).join(' ');
+  doc.font(F.bold).fontSize(32);
+  if (accentPart) {
+    doc.fillColor(COLOR_WHITE).text(`${plainPart} `, MARGIN.left, titleY, { width: titleWidth, continued: true });
+    doc.fillColor(COLOR_TEAL).text(accentPart, { continued: false });
+  } else {
+    doc.fillColor(COLOR_WHITE).text(guide.titulo || '', MARGIN.left, titleY, { width: titleWidth });
   }
 
-  const cats = (guide.categorias || []).map((c) => c.replace('.md', '').replace(/-/g, ' ')).join('  ·  ');
-  doc.font('Helvetica').fontSize(9.5).fillColor(COLOR_INK_DIM);
-  doc.text(cats.toUpperCase(), MARGIN.left, doc.page.height - 100, { width: doc.page.width - MARGIN.left - MARGIN.right, characterSpacing: 0.5 });
+  // Filete naranja debajo del título.
+  const ruleY = doc.y + 14;
+  doc.save();
+  doc.fillColor(COLOR_ORANGE).rect(MARGIN.left, ruleY, 64, 5).fill();
+  doc.restore();
+
+  if (guide.subtitulo) {
+    doc.font(F.reg).fontSize(14).fillColor(COLOR_ON_NAVY_DIM);
+    doc.text(guide.subtitulo, MARGIN.left, ruleY + 22, { width: titleWidth, lineGap: 3 });
+  }
+
+  const cats = (guide.categorias || []).map((c) => c.replace('.md', '').replace(/-/g, ' ')).join('   ·   ');
+  const fecha = new Date().toLocaleDateString('es-AR', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  }).toUpperCase();
+  doc.font(F.med).fontSize(9.5).fillColor(COLOR_ON_NAVY_DIM);
+  doc.text(fecha, MARGIN.left, doc.page.height - 90, { characterSpacing: 0.6, lineBreak: false });
+  if (cats) {
+    doc.text(cats, MARGIN.left, doc.page.height - 90, {
+      width: doc.page.width - MARGIN.left - MARGIN.right, align: 'right', characterSpacing: 0.4, lineBreak: false,
+    });
+  }
 }
 
-// Rediseño de legibilidad (15/9/2026) — feedback real que le llegó a
-// Rodrigo sobre la guía cero: "muy poco atractiva visualmente, difícil de
-// leer en un smartphone", con tres pedidos concretos: letra más grande,
-// texto condensado (eso se resuelve en el PROMPT de guia-cero.js, acá no
-// hay texto que condensar) y sumar figuras/gráficos/diagramas.
-//
-// Para "letra más grande": se sube el tamaño de cada tipo de bloque un
-// 20-25% (11→13.5 el cuerpo, 15→18 los títulos) y se agranda el interlineado
-// (lineGap 3→5). Aunque la página siga siendo A4, esto SÍ se nota leyendo en
-// el celular: casi todos los lectores de PDF en el teléfono abren "ajustado
-// al ancho" — el tamaño que se percibe en pantalla es directamente
-// proporcional al tamaño de fuente sobre el ancho de la página, así que
-// subir la fuente ~23% sube la letra percibida esa misma proporción, sin
-// tocar para nada el ancho de página (que si se cambiara, obligaría a
-// recalcular a mano toda la portada/pie de página de arriba — ver el
-// comentario grande sobre esos dos bugs reales ya encontrados con esa
-// misma cuenta; no vale la pena arriesgar eso de nuevo sin poder probarlo
-// primero con pdfkit corriendo de verdad).
-//
-// Para "figuras/gráficos/diagramas": se suman dos bloques nuevos, dibujados
-// a mano con las formas vectoriales de pdfkit (nunca una imagen externa ni
-// un navegador headless — mismo motivo de memoria que ya explica todo este
-// archivo): 'pasos' (una línea de tiempo vertical numerada, para procesos)
-// y 'destacado' (una caja resaltada para una idea clave), que rompen la
-// pared de texto sin agregar ningún costo de memoria real.
-// BUG REAL confirmado con una guía real (16/9/2026, capturas de Rodrigo:
-// "la guía tiene errores, no está bien" — texto empezando a mitad de página
-// y cortado en el borde derecho). Causa, distinta de los dos bugs de pdfkit
-// ya documentados arriba: pdfkit tiene un cursor interno (`doc.x`/`doc.y`)
-// que cualquier `doc.text(str, x, y, opciones)` con x/y EXPLÍCITOS deja
-// apuntando a esa x/y después de dibujar — no lo devuelve solo al margen
-// izquierdo. Los bloques nuevos ('pasos', 'destacado', 'tabla', 'grafico',
-// 'comparacion') dibujan texto en columnas o cajas con x explícita (por
-// diseño, tienen que hacerlo). El problema era que 'titulo'/'lista'/'cita'/
-// el 'parrafo' de siempre llamaban a `doc.text(str, { width })` SIN x — la
-// forma "implícita", que arranca desde donde haya quedado el cursor. Si el
-// bloque anterior era, por ejemplo, un 'grafico' (que termina su último
-// `doc.text()` bien a la derecha, dibujando el valor al final de la barra),
-// el título/párrafo que viniera después arrancaba desde ESA x —
-// bien adentro de la página, no del margen izquierdo — y con el mismo
-// ancho de columna completo (`contentWidth`) calculado para el margen
-// izquierdo real, el texto se salía por el borde derecho de la hoja.
-//
-// Corrección: TODO texto en esta función ahora pasa x explícita
-// (MARGIN.left, salvo los que ya la tenían distinta a propósito, como cada
-// celda de una tabla o cada columna de una comparación) — nunca más se
-// depende del cursor que haya dejado el bloque anterior. Ya no importa en
-// qué orden vengan los bloques.
-function renderBloque(doc, bloque) {
+// ---------------------------------------------------------------------------
+// Tarjeta genérica redondeada con una franja de acento a la izquierda —
+// usada por 'destacado', 'cita' y 'alerta', que comparten la misma
+// mecánica (medir alto → chequear espacio → dibujar caja → dibujar texto
+// adentro) y solo cambian de color/contenido. Centralizarla evita
+// triplicar el mismo bug-fix de espacio en tres bloques distintos.
+function drawAccentCard(doc, { bgColor, accentColor, boxHeight, padding = 16 }) {
   const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
+  if (doc.y + boxHeight > doc.page.height - MARGIN.bottom) {
+    doc.addPage();
+  }
+  const boxY = doc.y;
+  doc.save();
+  doc.fillColor(bgColor).roundedRect(MARGIN.left, boxY, contentWidth, boxHeight, 10).fill();
+  doc.restore();
+  doc.save();
+  doc.fillColor(accentColor).rect(MARGIN.left, boxY, 4, boxHeight).fill();
+  doc.restore();
+  return boxY;
+}
+
+// ---------------------------------------------------------------------------
+// renderBloque — dibuja un bloque de contenido dentro del cuerpo de una
+// página (fondo blanco). TODO texto acá pasa x explícita en su primera
+// línea (MARGIN.left u otra a propósito) — nunca depende del cursor que
+// dejó el bloque anterior (bug real documentado en versiones previas de
+// este archivo: un bloque que dibuja en columnas corridas desalineaba al
+// siguiente si este dependía del cursor implícito).
+function renderBloque(doc, bloque, F) {
+  const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
+
   if (bloque.tipo === 'titulo') {
     doc.moveDown(1.0);
-    doc.font('Helvetica-Bold').fontSize(18);
-    // Chequeo de espacio ANTES de dibujar (mismo patrón que 'pasos' y
-    // 'destacado' más abajo) — bug real visto en producción (16/9/2026,
-    // reportado por Rodrigo con captura): un título de dos líneas arrancaba
-    // pegado al borde inferior de la página y el salto automático de
-    // pdfkit lo partía a la mitad — "3. La mentalidad que separa construir
-    // de solo cambiar" quedaba en una página, "de trabajo" solo y huérfano
-    // arriba de la siguiente. Si el título completo (+ lugar para la
-    // reglita de abajo) no entra entero en lo que queda de la página, se
-    // fuerza el salto ANTES, nunca a mitad de su propio texto.
+    doc.font(F.bold).fontSize(21);
     const headingHeight = doc.heightOfString(bloque.texto, { width: contentWidth });
     if (doc.y + headingHeight + 24 > doc.page.height - MARGIN.bottom) {
       doc.addPage();
     }
-    doc.fillColor(COLOR_TEAL);
+    doc.fillColor(COLOR_INK);
     doc.text(bloque.texto, MARGIN.left, doc.y, { width: contentWidth });
-    // Pequeña regla horizontal debajo del título — separa la sección a
-    // simple vista, sin depender de que el lector note el cambio de color.
-    const ruleY = doc.y + 4;
+    const ruleY = doc.y + 6;
     doc.save();
-    doc.strokeColor(COLOR_TEAL).opacity(0.5).lineWidth(1.5);
-    doc.moveTo(MARGIN.left, ruleY).lineTo(MARGIN.left + 46, ruleY).stroke();
+    doc.fillColor(COLOR_ORANGE).rect(MARGIN.left, ruleY, 46, 4).fill();
     doc.restore();
-    doc.y = ruleY + 10;
+    doc.y = ruleY + 14;
     doc.x = MARGIN.left;
     return;
   }
+
+  if (bloque.tipo === 'parrafo') {
+    doc.moveDown(0.3);
+    const h = richTextHeight(doc, bloque.texto, F.reg, 12.5, contentWidth, 5);
+    if (doc.y + h > doc.page.height - MARGIN.bottom) doc.addPage();
+    drawRichText(doc, bloque.texto, {
+      x: MARGIN.left, y: doc.y, width: contentWidth, font: F.reg, boldFont: F.semi, size: 12.5, color: COLOR_INK_SOFT, boldColor: COLOR_INK, lineGap: 5,
+    });
+    doc.moveDown(0.55);
+    doc.x = MARGIN.left;
+    return;
+  }
+
   if (bloque.tipo === 'lista') {
     doc.moveDown(0.35);
-    doc.font('Helvetica').fontSize(13).fillColor(COLOR_INK);
+    const bulletX = MARGIN.left + 6;
+    const textX = MARGIN.left + 20;
+    const textWidth = contentWidth - 20;
     (bloque.items || []).forEach((item) => {
-      doc.text('•  ' + item, MARGIN.left, doc.y, { width: contentWidth, lineGap: 4 });
-      doc.moveDown(0.2);
+      const h = richTextHeight(doc, item, F.reg, 12, textWidth, 4);
+      if (doc.y + h + 6 > doc.page.height - MARGIN.bottom) doc.addPage();
+      doc.save();
+      doc.fillColor(COLOR_TEAL).circle(bulletX, doc.y + 7, 2.6).fill();
+      doc.restore();
+      drawRichText(doc, item, {
+        x: textX, y: doc.y, width: textWidth, font: F.reg, boldFont: F.semi, size: 12, color: COLOR_INK_SOFT, boldColor: COLOR_INK, lineGap: 4,
+      });
+      doc.moveDown(0.3);
+      doc.x = MARGIN.left;
     });
-    doc.moveDown(0.3);
+    doc.moveDown(0.25);
     doc.x = MARGIN.left;
     return;
   }
+
+  // 'cita' — ahora es una tarjeta oscura (navy) con franja naranja a la
+  // izquierda y una gran comilla, igual que la referencia. `texto` puede
+  // traer un salto de línea doble (\n\n) para separar la frase principal
+  // (grande, en negrita) de una segunda línea explicativa más chica —
+  // mismo truco que 'destacado' más abajo. Si no lo trae, se ve igual de
+  // bien con una sola línea + la atribución de autor/obra, como antes.
   if (bloque.tipo === 'cita') {
-    doc.moveDown(0.45);
-    doc.font('Helvetica-Oblique').fontSize(13).fillColor(COLOR_AMBER);
-    doc.text('"' + bloque.texto + '"', MARGIN.left, doc.y, { width: contentWidth, lineGap: 4 });
+    doc.moveDown(0.5);
+    const padding = 22;
+    const boxWidth = contentWidth;
+    const innerWidth = boxWidth - padding * 2 - 8;
+    const paragraphs = String(bloque.texto || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    const lead = paragraphs[0] || '';
+    const rest = paragraphs.slice(1);
+
+    let h = padding + 30; // lugar para la comilla decorativa
+    h += richTextHeight(doc, lead, F.bold, 16, innerWidth, 4);
+    rest.forEach((p) => { h += 8 + richTextHeight(doc, p, F.reg, 11.5, innerWidth, 3); });
+    if (bloque.autor) h += 20;
+    h += padding;
+
+    const boxY = drawAccentCard(doc, {
+      bgColor: COLOR_NAVY, accentColor: COLOR_ORANGE, boxHeight: h, padding,
+    });
+    doc.font(F.bold).fontSize(30).fillColor(COLOR_ORANGE);
+    doc.text('“', MARGIN.left + padding - 4, boxY + 8, { lineBreak: false });
+
+    let cy = boxY + padding + 24;
+    drawRichText(doc, lead, {
+      x: MARGIN.left + padding + 8, y: cy, width: innerWidth, font: F.bold, boldFont: F.bold, size: 16, color: COLOR_ON_NAVY, boldColor: COLOR_TEAL, lineGap: 4,
+    });
+    cy = doc.y + 8;
+    rest.forEach((p) => {
+      drawRichText(doc, p, {
+        x: MARGIN.left + padding + 8, y: cy, width: innerWidth, font: F.reg, boldFont: F.semi, size: 11.5, color: COLOR_ON_NAVY_DIM, boldColor: COLOR_ON_NAVY, lineGap: 3,
+      });
+      cy = doc.y + 8;
+    });
     if (bloque.autor) {
-      doc.font('Helvetica').fontSize(10.5).fillColor(COLOR_INK_DIM);
-      doc.text('— ' + bloque.autor + (bloque.obra ? ', ' + bloque.obra : ''), MARGIN.left, doc.y, { width: contentWidth });
+      doc.font(F.med).fontSize(10.5).fillColor(COLOR_ON_NAVY_DIM);
+      doc.text(`— ${bloque.autor}${bloque.obra ? `, ${bloque.obra}` : ''}`, MARGIN.left + padding + 8, cy, { width: innerWidth });
     }
-    doc.moveDown(0.45);
+    doc.y = boxY + h + 12;
     doc.x = MARGIN.left;
     return;
   }
-  // 'pasos' — línea de tiempo vertical numerada (un círculo con el número
-  // por paso, unidos por una línea). Pensado para procesos ("cómo funciona
-  // el sistema", "los pasos para arrancar") — mismo formato de entrada que
-  // 'lista' ({"items": [...]}) para que sea fácil de generar y de leer en
-  // el prompt, aunque el resultado visual sea muy distinto.
-  //
-  // Nota honesta sobre un límite conocido: si un paso individual es tan
-  // largo que su texto cruza un salto de página automático de pdfkit, el
-  // círculo del paso siguiente puede terminar en la página nueva sin la
-  // línea que lo conecta con el anterior — es un defecto cosmético, nunca
-  // se pierde texto (a diferencia de los dos bugs reales de arriba). El
-  // chequeo de espacio de abajo evita el caso más común (un círculo solo,
-  // huérfano, al pie de la página).
+
+  // 'pasos' — antes era una línea de tiempo vertical; ahora son tarjetas
+  // numeradas apiladas (tarjeta clara + círculo numerado, alternando
+  // teal/naranja), igual que "¿Qué se puede automatizar?" en la
+  // referencia. Convención nueva, sin romper nada viejo: si el texto de un
+  // paso arranca con **Título corto**, ese tramo se dibuja como mini-título
+  // en negrita y el resto como descripción más suave debajo — si no trae
+  // esa marca, el paso completo se dibuja como una sola línea de texto
+  // (se sigue viendo bien, solo sin la jerarquía título/descripción).
   if (bloque.tipo === 'pasos') {
     doc.moveDown(0.4);
     const items = (bloque.items || []).filter(Boolean);
-    const circleR = 11;
-    const circleX = MARGIN.left + circleR;
-    const gap = 14;
-    const textX = circleX + circleR + gap;
-    const textWidth = contentWidth - (circleR * 2 + gap);
-    let prevCircleBottom = null;
-    items.forEach((item, i) => {
-      // Si no entra ni el círculo + una línea de texto, se fuerza el salto
-      // de página ANTES de dibujar nada de este paso — mejor un paso entero
-      // en la página siguiente que un círculo cortado al final de esta.
-      if (doc.y + circleR * 2 + 20 > doc.page.height - MARGIN.bottom) {
-        doc.addPage();
-        prevCircleBottom = null; // no conectar la línea a través del salto de página
+    const circleR = 20;
+    const padding = 18;
+    const textX = MARGIN.left + padding * 2 + circleR * 2;
+    const textWidth = contentWidth - (padding * 2 + circleR * 2) - padding;
+
+    items.forEach((raw, i) => {
+      const m = /^\*\*([^*]+)\*\*:?\s*(.*)$/s.exec(raw);
+      const titulo = m ? m[1].trim() : null;
+      const cuerpo = m ? m[2].trim() : raw;
+
+      let h = padding * 2;
+      if (titulo) {
+        doc.font(F.bold).fontSize(14.5);
+        h += doc.heightOfString(titulo, { width: textWidth }) + 6;
       }
-      const stepTop = doc.y;
-      const circleCenterY = stepTop + circleR;
-      if (prevCircleBottom !== null) {
-        doc.save();
-        doc.strokeColor(COLOR_TEAL).opacity(0.35).lineWidth(1.2);
-        doc.moveTo(circleX, prevCircleBottom).lineTo(circleX, circleCenterY - circleR).stroke();
-        doc.restore();
+      if (cuerpo) h += richTextHeight(doc, cuerpo, F.reg, 11.5, textWidth, 3);
+      h = Math.max(h, circleR * 2 + padding);
+
+      if (doc.y + h > doc.page.height - MARGIN.bottom) doc.addPage();
+      const boxY = doc.y;
+      doc.save();
+      doc.fillColor(COLOR_CARD).roundedRect(MARGIN.left, boxY, contentWidth, h, 10).fill();
+      doc.restore();
+
+      const badgeColor = i % 2 === 0 ? COLOR_TEAL : COLOR_ORANGE;
+      const circleCY = boxY + padding + circleR;
+      doc.save();
+      doc.fillColor(badgeColor).circle(MARGIN.left + padding + circleR, circleCY, circleR).fill();
+      doc.restore();
+      doc.font(F.bold).fontSize(15).fillColor(COLOR_WHITE);
+      doc.text(String(i + 1), MARGIN.left + padding, circleCY - 8, { width: circleR * 2, align: 'center', lineBreak: false });
+
+      let ty = boxY + padding;
+      if (titulo) {
+        doc.font(F.bold).fontSize(14.5).fillColor(COLOR_INK);
+        doc.text(titulo, textX, ty, { width: textWidth });
+        ty = doc.y + 4;
       }
-      doc.save();
-      doc.fillColor(COLOR_TEAL).circle(circleX, circleCenterY, circleR).fill();
-      doc.restore();
-      doc.save();
-      doc.font('Helvetica-Bold').fontSize(10.5).fillColor(COLOR_BG);
-      doc.text(String(i + 1), circleX - circleR, circleCenterY - 5, { width: circleR * 2, align: 'center', lineBreak: false });
-      doc.restore();
-      doc.font('Helvetica').fontSize(12.5).fillColor(COLOR_INK);
-      doc.text(item, textX, stepTop, { width: textWidth, lineGap: 4 });
-      const stepBottom = Math.max(doc.y, circleCenterY + circleR);
-      prevCircleBottom = circleCenterY + circleR;
-      doc.y = stepBottom + 16;
+      if (cuerpo) {
+        drawRichText(doc, cuerpo, {
+          x: textX, y: ty, width: textWidth, font: F.reg, boldFont: F.semi, size: 11.5, color: COLOR_INK_SOFT, boldColor: COLOR_INK, lineGap: 3,
+        });
+      }
+      doc.y = boxY + h + 14;
+      doc.x = MARGIN.left;
     });
-    doc.moveDown(0.3);
-    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
+    doc.moveDown(0.2);
+    doc.x = MARGIN.left;
     return;
   }
-  // 'destacado' — caja resaltada para UNA idea clave (una sola frase corta,
-  // no un párrafo entero: el punto es que se lea de un vistazo). Mismo
-  // chequeo de espacio que 'pasos', por la misma razón.
+
+  // 'destacado' — caja crema con franja naranja (antes era un tinte teal
+  // sobre fondo navy; ahora el fondo de página es blanco, así que se
+  // invierte al tratamiento "callout claro" de la referencia, ej. "¿Qué NO
+  // se puede automatizar?"). Mismo truco de \n\n que 'cita' para admitir
+  // más de un párrafo corto adentro de la misma caja.
   if (bloque.tipo === 'destacado') {
     doc.moveDown(0.5);
-    const text = bloque.texto || '';
-    const padding = 14;
-    const boxWidth = contentWidth;
-    doc.font('Helvetica-Bold').fontSize(13);
-    const textHeight = doc.heightOfString(text, { width: boxWidth - padding * 2, lineGap: 4 });
-    const boxHeight = textHeight + padding * 2;
-    if (doc.y + boxHeight > doc.page.height - MARGIN.bottom) {
-      doc.addPage();
-    }
-    const boxY = doc.y;
-    doc.save();
-    doc.fillOpacity(0.14);
-    doc.fillColor(COLOR_TEAL).roundedRect(MARGIN.left, boxY, boxWidth, boxHeight, 8).fill();
-    doc.restore();
-    doc.save();
-    doc.fillColor(COLOR_TEAL).rect(MARGIN.left, boxY, 3, boxHeight).fill();
-    doc.restore();
-    doc.fillOpacity(1);
-    doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR_INK);
-    doc.text(text, MARGIN.left + padding, boxY + padding, { width: boxWidth - padding * 2, lineGap: 4 });
-    doc.y = boxY + boxHeight + 10;
+    const padding = 18;
+    const innerWidth = contentWidth - padding * 2 - 8;
+    const paragraphs = String(bloque.texto || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    let h = padding * 2;
+    paragraphs.forEach((p, i) => {
+      h += richTextHeight(doc, p, F.semi, 13, innerWidth, 4);
+      if (i < paragraphs.length - 1) h += 8;
+    });
+    const boxY = drawAccentCard(doc, {
+      bgColor: COLOR_CREAM, accentColor: COLOR_ORANGE, boxHeight: h, padding,
+    });
+    let cy = boxY + padding;
+    paragraphs.forEach((p) => {
+      drawRichText(doc, p, {
+        x: MARGIN.left + padding + 8, y: cy, width: innerWidth, font: F.semi, boldFont: F.bold, size: 13, color: COLOR_INK, boldColor: COLOR_INK, lineGap: 4,
+      });
+      cy = doc.y + 8;
+    });
+    doc.y = boxY + h + 10;
     doc.moveDown(0.3);
-    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
+    doc.x = MARGIN.left;
     return;
   }
-  // --- Segunda tanda de bloques visuales (16/9/2026) ------------------------
-  // Rodrigo pidió, en su propio mensaje, específicamente "gráficos, tablas,
-  // infografía" — 'pasos'/'destacado' de arriba ya ayudaban, pero seguía
-  // siendo básicamente texto con alguna forma. Estos tres son más fuertes:
-  // una tabla real, un gráfico de barras real, y una comparación de dos
-  // columnas (muy propia del contenido de Rodrigo — "mentalidad de empleado
-  // vs. mentalidad de dueño", "antes vs. después"). Mismo criterio de página
-  // que 'pasos'/'destacado': si no entra, se pasa de hoja entera, nunca se
-  // corta a la mitad de un dibujo.
-  //
-  // Cuidado importante, documentado acá porque no es obvio: un "gráfico" con
-  // números sugiere un dato real y sustentado. El prompt (guia-cero.js /
-  // weekly-guides.js) le prohíbe a Mentis usar estadísticas externas o cifras
-  // de mercado que no puede sustentar — 'grafico' es solo para ilustrar un
-  // punto conceptual PROPIO (ej. "cómo se reparte tu tiempo hoy vs. con el
-  // sistema"), nunca para disfrazar de dato duro algo que no lo es. Acá, del
-  // lado del dibujo, no hay forma de validar eso — es una regla de contenido,
-  // no de render.
 
-  // 'tabla' — {"headers":["...","..."], "filas":[["...","..."],...]}. Pensada
-  // para 2-3 columnas (más que eso, las celdas quedan muy angostas para leer
-  // cómodo en el celular) — el prompt le pide a Mentis respetar ese límite,
-  // pero acá no se lo fuerza (ancho de columna simplemente se reparte parejo
-  // entre las que vengan) para nunca perder una columna de más si el límite
-  // no se respetó.
+  // 'alerta' — bloque NUEVO (27/9/2026): caja sólida naranja con un "!"
+  // grande, para un aviso fuerte de una sola idea (ej. "El error más
+  // común" en la referencia). Mismo esquema de bloques de siempre —
+  // {"tipo":"alerta","texto":"..."} — así que weekly-guides.js/guia-cero.js
+  // solo necesitan sumar una línea al prompt para que Mentis lo use; si un
+  // deploy viejo todavía no lo pide, simplemente no aparece, nada se rompe.
+  if (bloque.tipo === 'alerta') {
+    doc.moveDown(0.5);
+    const padding = 20;
+    const iconWidth = 40;
+    const innerWidth = contentWidth - padding * 2 - iconWidth;
+    const h = Math.max(richTextHeight(doc, bloque.texto, F.bold, 14, innerWidth, 4) + padding * 2, 70);
+    if (doc.y + h > doc.page.height - MARGIN.bottom) doc.addPage();
+    const boxY = doc.y;
+    doc.save();
+    doc.fillColor(COLOR_ORANGE).roundedRect(MARGIN.left, boxY, contentWidth, h, 10).fill();
+    doc.restore();
+    doc.font(F.bold).fontSize(30).fillColor(COLOR_WHITE);
+    doc.text('!', MARGIN.left + padding, boxY + h / 2 - 18, { width: iconWidth, align: 'center', lineBreak: false });
+    drawRichText(doc, bloque.texto, {
+      x: MARGIN.left + padding + iconWidth,
+      y: boxY + padding,
+      width: innerWidth,
+      font: F.semi,
+      boldFont: F.bold,
+      size: 14,
+      color: COLOR_WHITE,
+      boldColor: COLOR_NAVY,
+      lineGap: 4,
+    });
+    doc.y = boxY + h + 12;
+    doc.moveDown(0.3);
+    doc.x = MARGIN.left;
+    return;
+  }
+
+  // 'tabla' — {"headers":[...], "filas":[[...],...]}. Encabezado navy con
+  // texto blanco, filas alternando blanco/tarjeta-clara — mismo esquema de
+  // medir todo antes de dibujar (para que la fila no se corte a la mitad)
+  // que ya tenía la versión anterior de este archivo.
   if (bloque.tipo === 'tabla') {
     doc.moveDown(0.4);
     const headers = bloque.headers || [];
@@ -360,27 +538,24 @@ function renderBloque(doc, bloque) {
     const cols = headers.length || (filas[0] ? filas[0].length : 0);
     if (cols === 0) return;
     const colWidth = contentWidth / cols;
-    const cellPad = 8;
+    const cellPad = 9;
 
     function cellHeight(text, fontName, fontSize) {
       doc.font(fontName).fontSize(fontSize);
       return doc.heightOfString(String(text == null ? '' : text), { width: colWidth - cellPad * 2, lineGap: 2 }) + cellPad * 2;
     }
-    const headerHeight = Math.max(...headers.map((h) => cellHeight(h, 'Helvetica-Bold', 11)), 26);
-    const rowHeights = filas.map((fila) => Math.max(...fila.map((c) => cellHeight(c, 'Helvetica', 11)), 22));
+    const headerHeight = Math.max(...headers.map((h) => cellHeight(h, F.semi, 11)), 28);
+    const rowHeights = filas.map((fila) => Math.max(...fila.map((c) => cellHeight(c, F.reg, 11)), 24));
 
-    // Si ni siquiera entran el encabezado + la primera fila, se pasa la
-    // tabla entera a la hoja siguiente — mejor una tabla completa más abajo
-    // que un encabezado solo, huérfano, al pie de la página.
     if (doc.y + headerHeight + (rowHeights[0] || 0) > doc.page.height - MARGIN.bottom) {
       doc.addPage();
     }
 
     let y = doc.y;
     doc.save();
-    doc.fillColor(COLOR_TEAL).rect(MARGIN.left, y, contentWidth, headerHeight).fill();
+    doc.fillColor(COLOR_NAVY).rect(MARGIN.left, y, contentWidth, headerHeight).fill();
     doc.restore();
-    doc.font('Helvetica-Bold').fontSize(11).fillColor(COLOR_BG);
+    doc.font(F.semi).fontSize(11).fillColor(COLOR_WHITE);
     headers.forEach((h, i) => {
       doc.text(String(h), MARGIN.left + i * colWidth + cellPad, y + cellPad, { width: colWidth - cellPad * 2, lineGap: 2 });
     });
@@ -388,21 +563,16 @@ function renderBloque(doc, bloque) {
 
     filas.forEach((fila, rIdx) => {
       const rh = rowHeights[rIdx];
-      // Salto de página POR FILA (no por tabla entera) a partir de acá — es
-      // la misma limitación cosmética honesta que ya tiene 'pasos': el
-      // encabezado no se repite en la página nueva, pero ningún dato se
-      // pierde.
       if (y + rh > doc.page.height - MARGIN.bottom) {
         doc.addPage();
         y = doc.y;
       }
       if (rIdx % 2 === 1) {
         doc.save();
-        doc.fillColor(COLOR_TEAL).fillOpacity(0.08).rect(MARGIN.left, y, contentWidth, rh).fill();
-        doc.fillOpacity(1);
+        doc.fillColor(COLOR_CARD).rect(MARGIN.left, y, contentWidth, rh).fill();
         doc.restore();
       }
-      doc.font('Helvetica').fontSize(11).fillColor(COLOR_INK);
+      doc.font(F.reg).fontSize(11).fillColor(COLOR_INK_SOFT);
       fila.forEach((c, i) => {
         doc.text(String(c == null ? '' : c), MARGIN.left + i * colWidth + cellPad, y + cellPad, { width: colWidth - cellPad * 2, lineGap: 2 });
       });
@@ -410,16 +580,12 @@ function renderBloque(doc, bloque) {
     });
     doc.y = y + 12;
     doc.moveDown(0.3);
-    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
+    doc.x = MARGIN.left;
     return;
   }
 
-  // 'grafico' — {"titulo":"... (opcional)", "categorias":["...","..."],
-  // "valores":[10,20,...], "unidad":"% (opcional)"}. Barras HORIZONTALES a
-  // propósito (no verticales): pdfkit no rota texto fácil, y una barra
-  // horizontal deja usar etiquetas de largo variable sin tener que
-  // inclinarlas. Categorías cortas (2-4 palabras) las pide el prompt, para
-  // que la etiqueta nunca envuelva a dos líneas y desalinee la barra.
+  // 'grafico' — barras horizontales, alternando teal/naranja por fila
+  // (mismo lenguaje de color que los círculos numerados de 'pasos').
   if (bloque.tipo === 'grafico') {
     doc.moveDown(0.4);
     const categorias = bloque.categorias || [];
@@ -432,20 +598,9 @@ function renderBloque(doc, bloque) {
     const barHeight = 16;
     const rowGap = 16;
 
-    // Alto total del gráfico (título opcional + todas las barras). Antes el
-    // chequeo de espacio era fila por fila nomás, así que una categoría
-    // "sobrante" podía terminar sola y huérfana arriba de la página
-    // siguiente, con el resto del gráfico atrás en la anterior — no se
-    // pierde ningún dato, pero queda feo (reportado por Rodrigo, 16/9/2026,
-    // con captura de un gráfico de 4 barras partido así). Si el gráfico
-    // completo entra en una página en blanco pero no en lo que queda de la
-    // actual, se fuerza el salto ANTES de dibujar la primera barra, para
-    // que todas queden juntas. Si el gráfico es tan largo que ni una
-    // página en blanco le alcanza, se deja el chequeo fila por fila de
-    // abajo como red de seguridad (nunca se corta una barra a la mitad).
     let tituloHeight = 0;
     if (bloque.titulo) {
-      doc.font('Helvetica-Bold').fontSize(12);
+      doc.font(F.semi).fontSize(12);
       tituloHeight = doc.heightOfString(bloque.titulo, { width: contentWidth }) + 5;
     }
     const chartHeight = tituloHeight + categorias.length * (barHeight + rowGap);
@@ -455,7 +610,7 @@ function renderBloque(doc, bloque) {
     }
 
     if (bloque.titulo) {
-      doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_INK);
+      doc.font(F.semi).fontSize(12).fillColor(COLOR_INK);
       doc.text(bloque.titulo, MARGIN.left, doc.y, { width: contentWidth });
       doc.moveDown(0.35);
     }
@@ -466,32 +621,31 @@ function renderBloque(doc, bloque) {
       }
       const val = valores[i] || 0;
       const y2 = doc.y;
-      doc.font('Helvetica').fontSize(10.5).fillColor(COLOR_INK_DIM);
-      doc.text(String(cat), MARGIN.left, y2 + 3, { width: labelWidth - 8, lineGap: 2, lineBreak: false, ellipsis: true });
+      doc.font(F.reg).fontSize(10.5).fillColor(COLOR_INK_DIM);
+      doc.text(String(cat), MARGIN.left, y2 + 3, {
+        width: labelWidth - 8, lineGap: 2, lineBreak: false, ellipsis: true,
+      });
       doc.save();
-      doc.fillColor(COLOR_INK_DIM).fillOpacity(0.15).rect(barAreaX, y2, barAreaWidth, barHeight).fill();
-      doc.fillOpacity(1);
+      doc.fillColor(COLOR_CARD).rect(barAreaX, y2, barAreaWidth, barHeight).fill();
       doc.restore();
       const w = Math.max(4, (val / maxVal) * barAreaWidth);
       doc.save();
-      doc.fillColor(COLOR_TEAL).rect(barAreaX, y2, w, barHeight).fill();
+      doc.fillColor(i % 2 === 0 ? COLOR_TEAL : COLOR_ORANGE).rect(barAreaX, y2, w, barHeight).fill();
       doc.restore();
-      doc.font('Helvetica-Bold').fontSize(10).fillColor(COLOR_INK);
+      doc.font(F.semi).fontSize(10).fillColor(COLOR_INK);
       doc.text(`${val}${bloque.unidad || ''}`, barAreaX + barAreaWidth + 6, y2 + 3, { width: 40, lineBreak: false });
       doc.y = y2 + barHeight + rowGap;
     });
     doc.moveDown(0.3);
-    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
+    doc.x = MARGIN.left;
     return;
   }
 
-  // 'comparacion' — {"izquierda":{"titulo":"...", "items":["...","..."]},
-  // "derecha":{"titulo":"...", "items":["...","..."]}}. Dos columnas lado a
-  // lado, izquierda en ámbar (el "antes"/problema) y derecha en teal (el
-  // "después"/solución) — mapea directo al tipo de contraste que ya usa
-  // Rodrigo en su contenido ("mentalidad de empleado" vs "mentalidad de
-  // dueño"). Ambas columnas se miden ANTES de dibujar nada, así la caja sale
-  // pareja (misma altura de las dos) sin importar cuál tenga más texto.
+  // 'comparacion' — dos columnas lado a lado: izquierda crema (el
+  // "antes"/problema), derecha menta (el "después"/solución) — mismo
+  // contraste cream/mint de la referencia ("si la respuesta es NO" /
+  // "si la respuesta es SÍ"), con una franja de acento arriba de cada
+  // columna en vez del tinte de fondo que tenía la versión anterior.
   if (bloque.tipo === 'comparacion') {
     doc.moveDown(0.4);
     const colGap = 16;
@@ -500,13 +654,12 @@ function renderBloque(doc, bloque) {
     const der = bloque.derecha || {};
 
     function colHeight(col) {
-      doc.font('Helvetica-Bold').fontSize(12);
-      let h = doc.heightOfString(col.titulo || '', { width: colWidth - 24 }) + 16;
-      doc.font('Helvetica').fontSize(11);
+      doc.font(F.bold).fontSize(13);
+      let h = doc.heightOfString(col.titulo || '', { width: colWidth - 28 }) + 20;
       (col.items || []).forEach((item) => {
-        h += doc.heightOfString('•  ' + item, { width: colWidth - 24, lineGap: 3 }) + 6;
+        h += richTextHeight(doc, item, F.reg, 11, colWidth - 40, 3) + 8;
       });
-      return h + 18;
+      return h + 20;
     }
     const boxHeight = Math.max(colHeight(izq), colHeight(der));
 
@@ -515,54 +668,99 @@ function renderBloque(doc, bloque) {
     }
     const boxY = doc.y;
 
-    function drawCol(col, x, color) {
+    function drawCol(col, x, bg, accent) {
       doc.save();
-      doc.fillColor(color).fillOpacity(0.12).roundedRect(x, boxY, colWidth, boxHeight, 8).fill();
-      doc.fillOpacity(1);
+      doc.fillColor(bg).roundedRect(x, boxY, colWidth, boxHeight, 10).fill();
       doc.restore();
       doc.save();
-      doc.fillColor(color).rect(x, boxY, colWidth, 3).fill();
+      doc.fillColor(accent).roundedRect(x, boxY, colWidth, 6, 3).fill();
       doc.restore();
-      doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_INK);
-      doc.text(col.titulo || '', x + 12, boxY + 16, { width: colWidth - 24 });
-      let cy = doc.y + 8;
-      doc.font('Helvetica').fontSize(11).fillColor(COLOR_INK_DIM);
+      doc.font(F.bold).fontSize(13).fillColor(COLOR_INK);
+      doc.text(col.titulo || '', x + 14, boxY + 22, { width: colWidth - 28 });
+      let cy = doc.y + 10;
       (col.items || []).forEach((item) => {
-        doc.text('•  ' + item, x + 12, cy, { width: colWidth - 24, lineGap: 3 });
-        cy = doc.y + 6;
+        doc.save();
+        doc.fillColor(accent).circle(x + 18, cy + 6, 2.4).fill();
+        doc.restore();
+        drawRichText(doc, item, {
+          x: x + 28, y: cy, width: colWidth - 40, font: F.reg, boldFont: F.semi, size: 11, color: COLOR_INK_SOFT, boldColor: COLOR_INK, lineGap: 3,
+        });
+        cy = doc.y + 8;
+        doc.x = MARGIN.left;
       });
     }
-    drawCol(izq, MARGIN.left, COLOR_AMBER);
-    drawCol(der, MARGIN.left + colWidth + colGap, COLOR_TEAL);
+    drawCol(izq, MARGIN.left, COLOR_CREAM, COLOR_ORANGE);
+    drawCol(der, MARGIN.left + colWidth + colGap, COLOR_MINT, COLOR_TEAL);
     doc.y = boxY + boxHeight + 14;
     doc.moveDown(0.3);
-    doc.x = MARGIN.left; // ver el comentario grande sobre el cursor de pdfkit, arriba de renderBloque
+    doc.x = MARGIN.left;
     return;
   }
 
-  // 'parrafo' y cualquier tipo desconocido caen acá — nunca se pierde texto
-  // por un tipo de bloque que no se reconoce.
-  doc.font('Helvetica').fontSize(13.5).fillColor(COLOR_INK);
+  // Tipo desconocido (o ausente) — nunca se pierde texto por un tipo que no
+  // se reconoce, se dibuja como párrafo normal.
+  doc.font(F.reg).fontSize(12.5).fillColor(COLOR_INK_SOFT);
   doc.text(bloque.texto || '', MARGIN.left, doc.y, { width: contentWidth, align: 'left', lineGap: 5 });
   doc.moveDown(0.55);
   doc.x = MARGIN.left;
 }
 
-// 'Índice visual' (16/9/2026) — página aparte, justo después de la portada,
-// que lista las secciones de la guía como una línea de tiempo numerada
-// (mismo lenguaje visual que 'pasos' de arriba, pero para el índice
-// completo). Pedido explícito de Rodrigo: quiere la guía "más visual y no
-// tan textual" — esto ataca el problema desde la primera página después de
-// la portada, antes de que el lector vea una sola línea de texto corrido:
-// de un vistazo entiende la estructura completa de lo que va a leer. Se
-// arma SOLO — no hace falta que el prompt genere nada especial para esto —
-// leyendo los bloques "titulo" que Mentis ya devuelve, así que funciona
-// igual para la guía cero como para cualquier guía del catálogo semanal.
-function drawVisualIndex(doc, titulos) {
+// Cierre de venta final — la referencia (última página, "¿Quieres que te
+// ayude a armarlo? Hablemos.") lo dibuja como una tarjeta navy propia, no
+// como texto corrido. En vez de sumar un tipo de bloque nuevo (que
+// obligaría a tocar el prompt Y el ida-y-vuelta a markdown de
+// weekly-guides.js/guia-cero.js para no perderlo al regenerar), esto
+// detecta el patrón que YA es obligatorio en ambos prompts — "los últimos
+// dos bloques tienen que ser un 'titulo' y un 'parrafo'" — y lo dibuja con
+// este tratamiento especial en vez del título+párrafo normal de fondo
+// blanco. Si algún día ese patrón cambia, esto simplemente deja de
+// activarse y el cierre se ve como cualquier título+párrafo normal — nunca
+// se rompe ni se pierde contenido.
+function isClosingPair(bloques, i) {
+  return bloques[i] && bloques[i].tipo === 'titulo'
+    && bloques[i + 1] && bloques[i + 1].tipo === 'parrafo'
+    && i + 2 === bloques.length;
+}
+
+function renderClosingCard(doc, titulo, parrafo, F) {
   const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
-  doc.font('Helvetica-Bold').fontSize(20).fillColor(COLOR_TEAL);
+  doc.moveDown(1.0);
+  const padding = 24;
+  const innerWidth = contentWidth - padding * 2;
+  let h = padding * 2;
+  doc.font(F.bold).fontSize(19);
+  h += doc.heightOfString(titulo, { width: innerWidth }) + 12;
+  h += richTextHeight(doc, parrafo, F.reg, 12.5, innerWidth, 4);
+
+  if (doc.y + h > doc.page.height - MARGIN.bottom) doc.addPage();
+  const boxY = doc.y;
+  doc.save();
+  doc.fillColor(COLOR_NAVY).roundedRect(MARGIN.left, boxY, contentWidth, h, 12).fill();
+  doc.restore();
+
+  doc.font(F.bold).fontSize(19).fillColor(COLOR_WHITE);
+  doc.text(titulo, MARGIN.left + padding, boxY + padding, { width: innerWidth });
+  const py = doc.y + 12;
+  drawRichText(doc, parrafo, {
+    x: MARGIN.left + padding, y: py, width: innerWidth, font: F.reg, boldFont: F.bold, size: 12.5, color: COLOR_ON_NAVY_DIM, boldColor: COLOR_TEAL, lineGap: 4,
+  });
+  doc.y = boxY + h + 12;
+  doc.x = MARGIN.left;
+}
+
+// ---------------------------------------------------------------------------
+// 'Índice visual' — página aparte después de la portada, listando los
+// títulos de sección como una línea de tiempo numerada. Mismo criterio que
+// antes (solo si hay 3+ secciones), recoloreado para fondo blanco.
+function drawVisualIndex(doc, titulos, F) {
+  const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
+  doc.font(F.bold).fontSize(20).fillColor(COLOR_INK);
   doc.text('En esta guía', MARGIN.left, doc.y, { width: contentWidth });
-  doc.moveDown(1.1);
+  const ruleY = doc.y + 6;
+  doc.save();
+  doc.fillColor(COLOR_ORANGE).rect(MARGIN.left, ruleY, 46, 4).fill();
+  doc.restore();
+  doc.y = ruleY + 24;
 
   const circleR = 13;
   const circleX = MARGIN.left + circleR;
@@ -585,13 +783,13 @@ function drawVisualIndex(doc, titulos) {
       doc.restore();
     }
     doc.save();
-    doc.fillColor(COLOR_TEAL).circle(circleX, centerY, circleR).fill();
+    doc.fillColor(i % 2 === 0 ? COLOR_TEAL : COLOR_ORANGE).circle(circleX, centerY, circleR).fill();
     doc.restore();
     doc.save();
-    doc.font('Helvetica-Bold').fontSize(12).fillColor(COLOR_BG);
+    doc.font(F.bold).fontSize(12).fillColor(COLOR_WHITE);
     doc.text(String(i + 1), circleX - circleR, centerY - 6, { width: circleR * 2, align: 'center', lineBreak: false });
     doc.restore();
-    doc.font('Helvetica-Bold').fontSize(13).fillColor(COLOR_INK);
+    doc.font(F.semi).fontSize(13).fillColor(COLOR_INK);
     doc.text(t, textX, stepTop + 2, { width: textWidth, lineGap: 4 });
     const stepBottom = Math.max(doc.y, centerY + circleR);
     prevBottom = centerY + circleR;
@@ -599,62 +797,63 @@ function drawVisualIndex(doc, titulos) {
   });
 }
 
-// BUG REAL encontrado en la primera corrida en vivo (2/9/2026) — el caveat
-// que se le avisó a Rodrigo se cumplió, esto no se había podido ejecutar en
-// el entorno de trabajo donde se escribió, solo revisar sintaxis. Las 3
-// guías generadas ese día fallaron TODAS al armar el PDF con "Maximum call
-// stack size exceeded". Causa: dibujar texto (`doc.text()`, en drawFooter)
-// dentro del evento `pageAdded` mientras pdfkit todavía está paginando
-// automáticamente por desborde de texto (dentro del forEach de bloques) lo
-// hace reentrar en su propia lógica de layout — es un problema conocido de
-// pdfkit, no un detalle menor. La corrección: el evento `pageAdded` ahora
-// SOLO pinta el fondo (un rectángulo relleno, `doc.rect().fill()` — nunca
-// texto, eso no dispara paginación). El pie de página con texto se agrega
-// después, en un segundo paso sobre las páginas ya generadas
-// (`bufferPages` + `switchToPage`), cuando ya no hay ninguna paginación
-// automática en curso.
+// BUG REAL encontrado en la primera corrida en vivo (2/9/2026, sigue
+// aplicando): dibujar texto dentro del evento 'pageAdded' mientras pdfkit
+// todavía está paginando por desborde reentra en su propia lógica de
+// layout ("Maximum call stack size exceeded"). Por eso 'pageAdded' PINTA
+// SOLO FORMAS (fondo blanco + barra navy, nunca texto) — el texto del
+// header y del pie de página se agrega después, en un segundo paso sobre
+// las páginas ya generadas (`bufferPages` + `switchToPage`), cuando ya no
+// hay ninguna paginación automática en curso.
 async function renderGuidePDF(guide) {
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ size: 'A4', margins: MARGIN, bufferPages: true, autoFirstPage: false });
+      const doc = new PDFDocument({
+        size: 'A4', margins: MARGIN, bufferPages: true, autoFirstPage: false,
+      });
+      const F = registerFonts(doc);
       const chunks = [];
       doc.on('data', (chunk) => chunks.push(chunk));
       doc.on('end', () => resolve(Buffer.concat(chunks)));
       doc.on('error', reject);
 
       // Portada — maquetación libre, sin los márgenes de las páginas de contenido.
-      doc.addPage({ size: 'A4', margins: { top: 0, bottom: 0, left: 0, right: 0 } });
-      drawCover(doc, guide);
+      doc.addPage({
+        size: 'A4', margins: {
+          top: 0, bottom: 0, left: 0, right: 0,
+        },
+      });
+      drawCover(doc, guide, F);
 
-      // A partir de acá, cada página nueva (esta primera manual, y las que
-      // vengan solas por desborde de texto) pinta su propio fondo — nunca
-      // texto en este evento, ver el comentario de arriba.
       doc.on('pageAdded', () => drawPageBackground(doc));
 
       doc.addPage({ size: 'A4', margins: MARGIN });
       drawPageBackground(doc);
 
-      // Página de índice visual — solo si hay al menos 3 secciones (con
-      // menos, no suma nada y sería una página casi vacía). Si aplica, la
-      // página recién agregada de arriba se usa PARA el índice, y se agrega
-      // una más para arrancar el contenido de verdad; si no aplica, la
-      // página de arriba ES directamente la primera de contenido, cero
-      // cambio de comportamiento para guías cortas.
       const seccionTitulos = (guide.bloques || []).filter((b) => b.tipo === 'titulo').map((b) => b.texto).filter(Boolean);
       if (seccionTitulos.length >= 3) {
-        drawVisualIndex(doc, seccionTitulos);
-        doc.addPage({ size: 'A4', margins: MARGIN }); // el fondo lo pinta solo el handler 'pageAdded' de arriba
+        drawVisualIndex(doc, seccionTitulos, F);
+        doc.addPage({ size: 'A4', margins: MARGIN });
       }
 
-      (guide.bloques || []).forEach((bloque) => renderBloque(doc, bloque));
+      const bloques = guide.bloques || [];
+      bloques.forEach((bloque, i) => {
+        if (isClosingPair(bloques, i)) {
+          renderClosingCard(doc, bloque.texto, bloques[i + 1].texto, F);
+          return;
+        }
+        if (i > 0 && isClosingPair(bloques, i - 1)) return; // ya se dibujó junto con el título anterior
+        renderBloque(doc, bloque, F);
+      });
 
-      // Pie de página — recién ahora, en un paso aparte sobre las páginas de
-      // contenido ya generadas (todas menos la portada, índice 0), con todo
-      // el texto de la guía ya escrito y sin ninguna paginación en curso.
+      // Header + pie de página — recién ahora, en un paso aparte sobre las
+      // páginas de contenido ya generadas (todas menos la portada, índice
+      // 0), con todo el texto de la guía ya escrito y sin paginación en curso.
       const range = doc.bufferedPageRange();
       for (let i = range.start + 1; i < range.start + range.count; i++) {
         doc.switchToPage(i);
-        drawFooter(doc, String(i));
+        drawHeaderText(doc, F);
+        drawFooter(doc, F, String(i), guide.titulo);
       }
 
       doc.end();

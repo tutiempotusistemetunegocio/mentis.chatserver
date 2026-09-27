@@ -188,6 +188,12 @@ function bloquesToMarkdown(bloques) {
       // importante" sin la caja de color.
       if (b.tipo === 'pasos') return (b.items || []).map((item, i) => `${i + 1}. ${item}`).join('\n');
       if (b.tipo === 'destacado') return `> **⭐ ${b.texto}**`;
+      // 'alerta' (27/9/2026, rediseño de guide-pdf.js pedido por Rodrigo) —
+      // mismo criterio que 'destacado': en texto plano se ve como una cita
+      // en negrita, con un ícono distinto (🔶 en vez de ⭐) para que se note
+      // que es un aviso, no una idea destacada — el PDF sí las dibuja bien
+      // distintas (caja sólida naranja vs. caja clara con franja).
+      if (b.tipo === 'alerta') return `> **🔶 ${b.texto}**`;
       // 'tabla', 'grafico' y 'comparacion' (16/9/2026) — mismo agregado que
       // guia-cero.js, ver el comentario grande en ese archivo.
       if (b.tipo === 'tabla') {
@@ -329,16 +335,17 @@ Basate en todo el conocimiento cargado más abajo.
 
 La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: un PDF con diseño (portada, colores, tipografía) y un texto plano. Para que ambos salgan iguales sin escribir la guía dos veces, en vez de un bloque de texto libre devolvé el contenido dividido en "bloques" — cada uno es un párrafo, un título de sección, una lista o una cita, en el orden en que van apareciendo:
 - {"tipo": "titulo", "texto": "..."} → encabezado de una sección dentro de la guía (no el título general, eso va aparte).
-- {"tipo": "parrafo", "texto": "..."} → texto corrido normal, corto (ver regla de texto condensado arriba).
-- {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos sin orden ni secuencia.
-- {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución — la regla de citar siempre que sea texto ajeno palabra por palabra.
-- {"tipo": "pasos", "items": ["...", "..."]} → una secuencia de pasos o un proceso, en orden. Se dibuja como línea de tiempo numerada.
-- {"tipo": "destacado", "texto": "..."} → una sola frase corta con la idea clave de la sección. Se dibuja como caja resaltada.
+- {"tipo": "parrafo", "texto": "..."} → texto corrido normal, corto (ver regla de texto condensado arriba). Podés resaltar la frase clave de adentro envolviéndola en **negrita** (ej. "si tu negocio depende **100% de ti**") — usalo con moderación, una frase resaltada por párrafo como mucho, nunca el párrafo entero.
+- {"tipo": "lista", "items": ["...", "..."]} → una lista de puntos sin orden ni secuencia. Mismo uso opcional de **negrita** que "parrafo".
+- {"tipo": "cita", "texto": "<la frase textual completa>", "autor": "...", "obra": "..." (opcional)} → SOLO para una frase textual completa de un autor/libro conocido, con su atribución — la regla de citar siempre que sea texto ajeno palabra por palabra. Se dibuja como una tarjeta oscura destacada.
+- {"tipo": "pasos", "items": ["...", "..."]} → una secuencia de pasos, un proceso o una lista de puntos numerados, en orden. Se dibuja como tarjetas numeradas. Si cada paso tiene un título corto y una explicación, escribilo como "**Título corto:** el resto de la explicación" — se dibuja con el título en negrita y la explicación debajo; si no hace falta esa separación, un item de texto simple también se ve bien.
+- {"tipo": "destacado", "texto": "..."} → la idea clave de la sección, en una o dos frases cortas. Se dibuja como una caja clara resaltada. Si necesitás dos frases separadas dentro de la misma caja, separalas con una línea en blanco (\\n\\n) en el texto.
+- {"tipo": "alerta", "texto": "..."} → UN aviso fuerte, del tipo "cuidado con esto" o "el error más común es..." — se dibuja como una caja sólida naranja con un ícono de alerta. Usalo con moderación (como mucho una vez por guía, para el punto que más vale la pena remarcar), nunca para contenido normal.
 - {"tipo": "tabla", "headers": ["...", "..."], "filas": [["...", "..."], ...]} → tabla de 2-3 columnas. Se dibuja como tabla real.
 - {"tipo": "grafico", "titulo": "... (opcional)", "categorias": ["...", "..."], "valores": [numero, ...], "unidad": "... (opcional)"} → barras horizontales. Solo para un punto conceptual tuyo, nunca una estadística inventada (ver regla arriba).
-- {"tipo": "comparacion", "izquierda": {"titulo": "...", "items": ["...", "..."]}, "derecha": {"titulo": "...", "items": ["...", "..."]}} → dos columnas lado a lado.
+- {"tipo": "comparacion", "izquierda": {"titulo": "...", "items": ["...", "..."]}, "derecha": {"titulo": "...", "items": ["...", "..."]}} → dos columnas lado a lado (izquierda = problema/antes, derecha = solución/después).
 
-Los ÚLTIMOS dos bloques del array (después de todo el contenido) tienen que ser el cierre de venta descripto arriba: un "titulo" y un "parrafo".
+Los ÚLTIMOS dos bloques del array (después de todo el contenido) tienen que ser el cierre de venta descripto arriba: un "titulo" y un "parrafo" — ese "parrafo" se dibuja como una tarjeta de cierre propia, así que envolvé en **negrita** la frase concreta de la invitación (ej. "escribile la palabra **PREMIUM**") para que resalte en color dentro de la tarjeta.
 
 Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
 {"categorias": ["archivo1.md", "archivo2.md"], "titulo": "<título de la guía, claro y concreto>", "subtitulo": "<una frase corta que va debajo del título en la portada>", "bloques": [ ...los bloques descriptos arriba, la guía completa... ], "citas": [{"autor": "...", "obra": "...", "frase": "..."}]}
@@ -529,6 +536,12 @@ function parseGuideMarkdown(md) {
     if (chunk.startsWith('> **⭐ ')) {
       const texto = chunk.replace(/^> \*\*⭐ /, '').replace(/\*\*$/, '').trim();
       return { tipo: 'destacado', texto };
+    }
+    // 'alerta' (27/9/2026) — inverso de la línea nueva de arriba, mismo
+    // patrón que 'destacado' con su propio ícono para distinguirla.
+    if (chunk.startsWith('> **🔶 ')) {
+      const texto = chunk.replace(/^> \*\*🔶 /, '').replace(/\*\*$/, '').trim();
+      return { tipo: 'alerta', texto };
     }
     if (chunk.startsWith('> "')) {
       const chunkLines = chunk.split('\n');
