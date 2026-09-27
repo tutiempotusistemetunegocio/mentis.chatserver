@@ -173,16 +173,18 @@ async function pedirleAMentisQueElijaLaGuia(anguloHoy, guionHoy, candidatas) {
 // pickGuideForSubscriber (arriba, pensada para que cada PERSONA reciba una
 // guía distinta sin repetir, y por eso necesita el flujo completo de
 // ManyChat con External Request), esta es la MISMA para cualquiera que
-// comente HOY — la guía del catálogo que mejor combina con el reel de hoy —
-// así que se puede servir como un link FIJO simple (GET /guia-del-reel, sin
-// parámetros), compatible con el asistente rápido de ManyChat que solo
-// acepta links fijos.
+// comente HOY — así que se puede servir como un link FIJO simple (GET
+// /guia-del-reel, sin parámetros), compatible con el asistente rápido de
+// ManyChat que solo acepta links fijos.
 //
-// Se recalcula UNA vez por día, no en cada pedido: guarda la elección en
-// guia-del-reel-hoy.json (misma carpeta que el catálogo) junto con la fecha,
-// y solo le vuelve a preguntar a Mentis cuál combina mejor cuando cambia el
-// día — evita gastar una llamada a la API de Claude por cada persona que
-// comenta el mismo día.
+// REARMADO (27/9/2026): antes esto le preguntaba a Mentis cuál guía
+// existente "combina mejor" con el reel de hoy (un match aproximado, mejor
+// esfuerzo). Ahora que weekly-guides.js corre a diario y el reel se escribe
+// justamente SOBRE la guía de hoy (ver daily-script.js), la respuesta ya no
+// hace falta adivinarla: se busca directo por fecha. El camino viejo
+// (consulta a Mentis + caché en guia-del-reel-hoy.json) queda como
+// respaldo, solo para el caso de que la guía de hoy no se haya podido
+// generar.
 async function guiaDelReelDeHoy() {
   const token = await getDropboxAccessToken();
   const dateStr = todayUTC();
@@ -193,6 +195,23 @@ async function guiaDelReelDeHoy() {
     return { ok: false, error: 'Todavía no hay ninguna guía gratis con PDF cargada en el catálogo.' };
   }
 
+  // Camino directo (27/9/2026, reemplaza el "mejor match" de más abajo como
+  // caso normal): weekly-guides.js corre a diario desde ahora y el reel del
+  // día se escribe justamente SOBRE la guía de hoy (ver daily-script.js) —
+  // así que la guía del reel de hoy YA ES, por construcción, la guía gratis
+  // generada hoy mismo. Ya no hace falta pedirle a Mentis que "adivine"
+  // cuál combina mejor: se busca directo por fecha en el id (mismo formato
+  // que arma weekly-guides.js: "<fecha>-gratis-<slug>").
+  const deHoy = gratisConPdf.find((e) => typeof e.id === 'string' && e.id.startsWith(`${dateStr}-gratis-`));
+  if (deHoy) {
+    return { ok: true, id: deHoy.id, titulo: deHoy.titulo };
+  }
+
+  // Camino de respaldo (se mantiene, nunca se borra): si por lo que sea hoy
+  // no hay ninguna guía gratis generada todavía (falló la corrida diaria, o
+  // se pide esto antes de que corra), se vuelve al criterio anterior —
+  // cachear una elección "mejor match" de Mentis para no repetir la
+  // consulta en cada pedido del mismo día.
   const cache = await dropboxDownloadJSON(token, REEL_GUIDE_CACHE_PATH, null);
   if (cache && cache.date === dateStr && cache.guideId) {
     const cached = gratisConPdf.find((g) => g.id === cache.guideId);

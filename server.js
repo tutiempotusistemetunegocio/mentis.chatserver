@@ -866,11 +866,14 @@ const server = http.createServer((req, res) => {
 
   // Catálogo de guías (Módulo 02 → weekly-guides.js) — arma hasta
   // GUIDES_PER_RUN_FREE gratis + GUIDES_PER_RUN_PREMIUM premium por corrida,
-  // cruzando 2+ categorías de conocimiento. Mismo patrón de secreto que el
-  // resto de las rutas /internal/*, disparada semanalmente por GitHub
-  // Actions (ver weekly-guides.yml) — o a mano, varias veces seguidas, para
-  // juntar rápido las primeras 20 (mismo truco que ya se usó con la lectura
-  // diaria y el backlog de libros).
+  // en pares gratis+premium con la misma combinación de categorías (mismo
+  // tema). Mismo patrón de secreto que el resto de las rutas /internal/*,
+  // disparada A DIARIO por GitHub Actions (ver weekly-guides.yml — pasó de
+  // semanal a diario el 27/9/2026, para que daily-script.js tenga la guía
+  // del día lista y pueda escribir el reel sobre ese mismo tema) — o a
+  // mano, varias veces seguidas, para juntar rápido las primeras guías
+  // (mismo truco que ya se usó con la lectura diaria y el backlog de
+  // libros).
   if (req.method === 'POST' && req.url === '/internal/weekly-guides') {
     const expected = process.env.GUIDES_SECRET;
     const got = req.headers['x-guides-secret'];

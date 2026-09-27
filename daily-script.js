@@ -6,6 +6,18 @@
 // variables ya cargadas ahí) — igual que daily-ingest.js, ningún secreto
 // nuevo viaja a ningún otro lado.
 //
+// TEMA ANCLADO A LA GUÍA DEL DÍA (27/9/2026, pedido explícito de Rodrigo:
+// "los reels... quiero que sean sobre las guías... el reel tiene que
+// enfocar el tema de la guía"): antes, el "ángulo" de cada día lo elegía
+// Mentis libremente entre todo el conocimiento cargado. Ahora, ver
+// fetchTodaysGuide() más abajo: se busca la guía gratis que weekly-guides.js
+// armó hoy mismo (ese módulo pasó a correr a diario, 15 minutos antes que
+// este) y generateReelScript() escribe el gancho de hoy sobre ESE tema —
+// sigue usando toda la misma estrategia de ganchos de siempre (rotación de
+// tipos, checklist de calidad), solo que ya no elige tema libre. Si por lo
+// que sea no hay guía de hoy, se cae de vuelta al modo libre — nunca se
+// bloquea el reel por esto.
+//
 // Import honesto de lo que este archivo NO hace todavía: el plano describe
 // que, con semanas de datos reales de Metricool, Mentis prioriza el ángulo
 // ganador y vuelve a probar ángulos nuevos cuando ese cae. Como Metricool
@@ -61,6 +73,10 @@ const KNOWLEDGE_DIR = path.join(__dirname, 'knowledge');
 const CONTENT_DIR = path.join(__dirname, 'contenido');
 const HISTORY_PATH = path.join(__dirname, 'content-history.json');
 const CONTENT_FOLDER = process.env.DROPBOX_CONTENT_FOLDER || '/mentis-contenido';
+// Mismo default que weekly-guides.js (DROPBOX_GUIDES_FOLDER) — se necesita
+// acá también desde el 27/9/2026 para leer la guía gratis del día (ver
+// fetchTodaysGuide más abajo).
+const GUIDES_FOLDER = process.env.DROPBOX_GUIDES_FOLDER || '/mentis-guias';
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
 const PODCAST_EVERY_N_DAYS = 3;
 // Cambiado a false el 5/9/2026, pedido explícito de Rodrigo (ver nota
@@ -96,6 +112,53 @@ async function dropboxUpload(token, dropboxPath, buffer) {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} subiendo ${dropboxPath}`);
+}
+
+// Lee la guía gratis que se armó HOY (Módulo 02 → weekly-guides.js, que
+// desde el 27/9/2026 corre a diario y sube su catálogo actualizado antes de
+// que corra este guion — ver el orden de horarios en weekly-guides.yml).
+// Pedido explícito de Rodrigo (27/9/2026): "los reels... quiero que sean
+// sobre las guías... el reel tiene que enfocar el tema de la guía" — esto
+// es lo que le da a generateReelScript() el tema fijo del día, en vez de
+// que Mentis elija uno libre.
+//
+// Busca directo por fecha en el id del catálogo (mismo formato que arma
+// weekly-guides.js: "<fecha>-gratis-<slug>", con un sufijo random opcional
+// SOLO al final — ver el comentario en generateAndSave de ese archivo).
+// Nunca rompe el guion de hoy si algo de esto falla (Dropbox lento, catálogo
+// vacío, la guía de hoy no se pudo generar): devuelve null y quien llama se
+// cae al modo libre de siempre, como si esta función no existiera.
+async function fetchTodaysGuide(token, dateStr) {
+  try {
+    const catalogBuf = await dropboxDownload(token, `${GUIDES_FOLDER}/guide-catalog.json`);
+    const catalog = JSON.parse(catalogBuf.toString('utf-8'));
+    const entry = (catalog.entries || []).find((e) => e.tipo === 'gratis' && typeof e.id === 'string' && e.id.startsWith(`${dateStr}-gratis-`));
+    if (!entry) return null;
+
+    const mdBuf = await dropboxDownload(token, `${GUIDES_FOLDER}/gratis/${entry.archivo}`);
+    const md = mdBuf.toString('utf-8');
+
+    // Mismo criterio heurístico que parseGuideMarkdown() en weekly-guides.js
+    // (duplicado a propósito acá, igual que guia-cero.js hace con
+    // bloquesToMarkdown — no vale la pena acoplar dos módulos por unas
+    // pocas líneas): la primera línea en *cursiva* después del título, si
+    // no es la línea fija de metadata, es el subtítulo.
+    let subtitulo = null;
+    const lines = md.split('\n');
+    for (let i = 1; i < lines.length; i++) {
+      const l = lines[i].trim();
+      if (!l) continue;
+      if (l.startsWith('*') && l.endsWith('*') && !l.startsWith('*Guía ')) subtitulo = l.slice(1, -1).trim();
+      break;
+    }
+
+    return {
+      id: entry.id, titulo: entry.titulo, subtitulo, cuerpo: md,
+    };
+  } catch (err) {
+    console.error('No se pudo leer la guía de hoy para anclar el reel (se cae al modo libre de siempre):', err.message);
+    return null;
+  }
 }
 
 function loadHistory() {
@@ -203,23 +266,43 @@ const VOICE_RULES = `Reglas fijas que nunca se rompen:
 - Nunca menciones que Rodrigo vive en Miami, y no le des mucho peso a su esposa — sí a su disciplina, su historia (Venezuela → Portugal → Canadá), el valor del tiempo y las ganas de ayudar a otros a salir de la mentalidad de empleado.
 - Esto no es contenido por contenido: el objetivo final es vender (a Rodrigo mismo — sus guías, su sistema). Cada pieza tiene que usar, a propósito, lo que está cargado sobre neurociencia/psicología de la persuasión, redes sociales y network marketing — combinado con la historia personal de Rodrigo — para generar conexión real con quien lo lee/mira. La conexión no es el fin, es el medio: siempre tiene que llevar a una acción concreta de venta al cierre (ver CTA), nunca quedarse en "contenido de valor" suelto sin ningún objetivo comercial detrás.`;
 
-async function generateReelScript(dateStr, wIdx, history) {
+async function generateReelScript(dateStr, wIdx, history, guiaDeHoy) {
   const recent = history.entries.slice(-HISTORY_LOOKBACK).filter((e) => e.tipo === 'reel');
   const recentAngles = recent.map((e) => `${e.date}: ${e.angulo}`).join('\n') || '(sin historial todavía)';
   const angleType = todaysAngleType(dateStr);
   const angleTypeNote = angleType
-    ? `Según la rotación de ángulos en prueba esta semana (reglas.md), hoy toca un ángulo del TIPO "${angleType}" — desarrollá el gancho concreto de hoy dentro de ese tipo (no elijas un tipo distinto), aunque el gancho específico tiene que ser nuevo, distinto a los últimos usados.`
+    ? `Según la rotación de ángulos en prueba esta semana (reglas.md), hoy toca un ángulo del TIPO "${angleType}" — presentá el tema de hoy con un gancho de ESE tipo (no elijas un tipo distinto), aunque el gancho específico tiene que ser nuevo, distinto a los últimos usados.`
     : '';
+
+  // Pedido explícito de Rodrigo (27/9/2026): "los guiones de los reels...
+  // quiero que sean sobre las guías... el reel tiene que enfocar el tema de
+  // la guía... que Mentis utilice toda su estrategia para hacer buenos
+  // ganchos". De acá en más el TEMA de hoy no lo elige este guion: ya lo
+  // eligió la guía del día (weekly-guides.js, que ahora corre a diario —
+  // ver fetchTodaysGuide más arriba). El trabajo de este prompt pasa de
+  // "elegí un tema y un gancho" a "encontrá el mejor gancho posible para
+  // ESTE tema ya decidido" — sigue aplicando toda la estrategia de ganchos
+  // de siempre (rotación de tipos, checklist de 5 puntos más abajo), solo
+  // que ahora apuntada a un tema fijo en vez de libre. Si por lo que sea
+  // todavía no hay guía generada hoy (falló, o es una corrida de prueba
+  // antes de que el armado diario haya corrido), se cae de vuelta al modo
+  // libre de siempre — nunca se bloquea el reel de hoy por esto.
+  const temaNote = guiaDeHoy
+    ? `El TEMA de hoy ya está decidido — no lo elegís vos, viene de la guía que se armó hoy mismo: "${guiaDeHoy.titulo}"${guiaDeHoy.subtitulo ? ` (${guiaDeHoy.subtitulo})` : ''}. Contenido completo de esa guía, para sacar ejemplos y detalles concretos (nunca un tema genérico ni distinto a este):\n${guiaDeHoy.cuerpo.slice(0, 4000)}\n\nTu trabajo NO es elegir un tema — es encontrar el MEJOR gancho posible para presentar ESTE tema exacto, usando toda tu estrategia de persuasión (psicología del consumidor, copywriting, lo que aplique). El cierre invita a comentar "MENTIS" para recibir esta misma guía gratis, así que el gancho tiene que dejar con ganas real de leerla.`
+    : 'Todavía no hay ninguna guía armada para hoy — elegí también un tema/ángulo concreto, distinto a los últimos usados (ver historial abajo).';
+
   const prompt = `Sos Mentis escribiendo el guion de contenido de hoy (${dateStr}) para Rodrigo, dueño de este sistema.
 
 ${VOICE_RULES}
 
-Elegí un formato (reel corto de 30-60s, o carrusel de 5-8 slides) y un ángulo/gancho concreto para hoy, distinto a los últimos usados. Angulos usados recientemente (no repitas el mismo gancho central):
+Elegí un formato (reel corto de 30-60s, o carrusel de 5-8 slides) y un gancho concreto para hoy, distinto a los últimos usados. Ganchos usados recientemente (no repitas el mismo gancho central):
 ${recentAngles}
+
+${temaNote}
 
 ${angleTypeNote}
 
-Basate en todo el conocimiento cargado más abajo — combiná lo que haga falta (marketing, mentalidad, ventas, redes, lo que aplique), como lo haría alguien que domina todas esas áreas a la vez.
+Basate en todo el conocimiento cargado más abajo para profundizar el gancho — combiná lo que haga falta (marketing, mentalidad, ventas, redes, lo que aplique), como lo haría alguien que domina todas esas áreas a la vez.
 
 Además del guion completo (pensado como registro/respaldo, no para narrarse: el reel se publica SIN voz, solo música + texto en pantalla), el clip de video que se genera con IA a partir de tu foto real de hoy dura como máximo 12 segundos por pedido — techo de la plataforma, no ajustable. Pedido explícito de Rodrigo (15/9/2026): siempre UN SOLO clip, nunca lo dividas en dos partes — describí una sola escena ("escenaVisual") que condense el gancho central de hoy en UN SOLO momento concreto y filmable en 12s, nunca una secuencia de varias escenas ni algo que necesite más de 12s para leerse o tener sentido.
 
@@ -293,6 +376,7 @@ async function runDailyScript() {
 
   const dateStr = todayUTC();
   const wIdx = weekdayIndex(dateStr);
+  const guiaDeHoy = await fetchTodaysGuide(dropboxToken, dateStr);
   const generated = [];
   let skippedReel = null;
   let podcastGenerated = false;
@@ -310,7 +394,7 @@ async function runDailyScript() {
   // respuesta cuenta cuál falló y por qué en vez de perder todo en silencio.
   if (wIdx !== null || !WEEKDAYS_ONLY) {
     try {
-      const reel = await generateReelScript(dateStr, wIdx, history);
+      const reel = await generateReelScript(dateStr, wIdx, history, guiaDeHoy);
       const fname = `${dateStr}-${reel.formato === 'carrusel' ? 'carrusel' : 'reel'}.md`;
       const body = `# ${dateStr} — ${reel.formato}\n\n**Ángulo:** ${reel.angulo}\n\n---\n\n${reel.guion}\n\n---\n\n**CTA:** ${reel.cta}\n`;
       fs.writeFileSync(path.join(CONTENT_DIR, fname), body);
@@ -319,11 +403,17 @@ async function runDailyScript() {
       // guarda). daily-media.js sigue sabiendo leer un `dosPartes: true` de
       // una entrada VIEJA del historial (por compatibilidad con lo ya
       // generado), pero ninguna entrada nueva lo va a tener nunca más.
+      // guiaId (27/9/2026): referencia a la guía gratis sobre la que se
+      // escribió este reel (null si ese día no había ninguna) — no hace
+      // falta para que guiaDelReelDeHoy() la encuentre (busca por fecha
+      // directo en el catálogo), pero queda como cruce útil para auditar
+      // qué reel correspondió a qué guía.
       history.entries.push({
         date: dateStr, tipo: 'reel', formato: reel.formato, angulo: reel.angulo,
         escenaVisual: reel.escenaVisual || null,
         captionText: reel.captionText || null,
         musicStyle: reel.musicStyle || null,
+        guiaId: guiaDeHoy ? guiaDeHoy.id : null,
       });
       generated.push(fname);
     } catch (err) {

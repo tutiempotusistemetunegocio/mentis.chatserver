@@ -5,19 +5,34 @@
 // reutiliza las claves ya cargadas en Render, y ningún secreto nuevo viaja a
 // ningún otro lado.
 //
-// Pedido explícito de Rodrigo (2/9/2026): antes de vender, arrancar con 10
-// guías premium + 10 gratis ya cargadas — y que el catálogo quede "siempre
-// alimentado": todas las semanas, al menos 2 guías gratis + 2 premium
-// nuevas, para siempre (no es un lote único, es un módulo recurrente).
+// REARMADO (27/9/2026, pedido explícito de Rodrigo): quiere empezar a hacer
+// reels sobre las guías — "el reel tiene que enfocar el tema de la guía" — y
+// que cada guía gratis tenga su premium sobre el MISMO tema, no dos temas
+// sueltos. Para que eso sea posible todos los días (no solo una vez por
+// semana), este módulo pasa de correr una vez por semana a correr A DIARIO
+// (ver el cron nuevo en el workflow de GitHub Actions) y arma la guía
+// gratis + la premium de cada corrida EN PAR, con la MISMA combinación de
+// categorías — distinta profundidad, mismo tema. daily-script.js (Módulo
+// 03) lee la guía gratis del día y escribe el reel a partir de ESE tema.
 //
-// Por qué el arranque de 10+10 y las semanas normales usan la MISMA corrida,
-// sin un modo especial "primera vez": cada corrida genera hasta
-// GUIDES_PER_RUN_FREE gratis + GUIDES_PER_RUN_PREMIUM premium (2+2 por
-// default). Para juntar las primeras 20 rápido, Rodrigo puede disparar esta
-// tarea a mano varias veces seguidas desde la pestaña "Actions" de GitHub —
-// exactamente el mismo truco que ya usó para ponerse al día con los ~101
-// libros pendientes de la lectura diaria. Después, el cron semanal solo
-// hace la reposición de 2+2 — no hace falta ningún interruptor.
+// También, mismo pedido: quiere que el 80% de las guías nuevas (de acá en
+// adelante — el catálogo ya armado NO se toca ni se borra, sigue sirviendo
+// igual) hablen de redes sociales, network marketing, marketing,
+// persuasión/copywriting, psicología del consumidor, IA/automatización,
+// ventas o storytelling — ver CORE_CATEGORIES y pickCategoryCombo() más
+// abajo. Antes, Mentis elegía las 2-3 categorías de cada guía completamente
+// libre entre TODO el conocimiento cargado (sin ningún sesgo real hacia
+// esos temas) — ahora la combinación de categorías la elige este código
+// (con el sesgo 80/20), y Mentis solo escribe la guía a partir de la
+// combinación ya decidida.
+//
+// Pedido original (2/9/2026): antes de vender, arrancar con 10 guías
+// premium + 10 gratis ya cargadas — y que el catálogo quede "siempre
+// alimentado" (no es un lote único, es un módulo recurrente). Sigue
+// aplicando igual con la cadencia diaria: para juntar guías rápido, Rodrigo
+// puede disparar esta tarea a mano varias veces seguidas desde la pestaña
+// "Actions" de GitHub — mismo truco que ya usó para ponerse al día con el
+// backlog de libros de la lectura diaria.
 //
 // Regla de contenido nueva, pedida junto con esto: si en algún momento una
 // guía necesita citar una frase COMPLETA y textual de un autor/libro (no una
@@ -36,16 +51,22 @@
 // Rodrigo todavía no armó. El catálogo queda guardado con un id estable por
 // guía justamente para que, el día que se conecte ManyChat, ese módulo solo
 // tenga que leer esta misma lista y llevar su propio historial de qué le
-// mandó a cada cliente — no hace falta rehacer nada de esto.
+// mandó a cada cliente — no hace falta rehacer nada de esto. Tampoco existe
+// todavía ninguna ruta que entregue automáticamente la guía PREMIUM
+// correcta cuando alguien responde la palabra "PREMIUM" al cierre de venta
+// de la gratis — hoy sigue siendo un CTA manual (Rodrigo responde a mano).
+// Con el nuevo pareo por tema esto vale más la pena que antes (ya hay una
+// premium específica para enlazar, no solo una promesa genérica), pero es
+// un módulo aparte, no construido en este cambio.
 //
 // Qué hace, en orden:
 //  1. Baja de Dropbox el conocimiento y el catálogo de guías existente (por
 //     si el servicio se reinició — mismo motivo de siempre).
-//  2. Por cada tipo (gratis, premium), genera hasta su cupo por corrida:
-//     le pide a Mentis que elija 2 o 3 categorías de conocimiento que se
-//     complementen, evitando repetir una combinación ya usada hace poco,
-//     y que escriba la guía completa con las reglas de voz + la regla de
-//     citas nueva.
+//  2. Arma hasta pairCount pares gratis+premium (ver runWeeklyGuides): para
+//     cada par, elige UNA combinación de 2-3 categorías (con sesgo núcleo
+//     80/20, evitando repetir una combinación ya usada hace poco) y le pide
+//     a Mentis que escriba la guía gratis y la premium a partir de esa
+//     misma combinación, cada una con las reglas de voz + la regla de citas.
 //  3. Guarda cada guía como archivo .md fechado y actualiza el índice del
 //     catálogo (guide-catalog.json), y sube todo a Dropbox.
 
@@ -73,9 +94,16 @@ const GUIDES_DIR = path.join(__dirname, 'guias');
 const CATALOG_PATH = path.join(__dirname, 'guide-catalog.json');
 const GUIDES_FOLDER = process.env.DROPBOX_GUIDES_FOLDER || '/mentis-guias';
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-5';
-const GUIDES_PER_RUN_FREE = parseInt(process.env.GUIDES_PER_RUN_FREE || '2', 10);
-const GUIDES_PER_RUN_PREMIUM = parseInt(process.env.GUIDES_PER_RUN_PREMIUM || '2', 10);
-const HISTORY_LOOKBACK = 12; // cuántas combinaciones recientes del mismo tipo se le muestran a Mentis para no repetir
+// Bajado de 2+2 a 1+1 (27/9/2026): este módulo pasó de correr una vez por
+// semana a correr A DIARIO (ver el workflow nuevo), y cada corrida arma un
+// PAR gratis+premium para que daily-script.js tenga la guía del día lista
+// para anclar el reel — 1+1 por día ya es más que el 2+2 semanal de antes
+// (7 pares por semana vs. 2), así que subir el default además haría la
+// factura de la API mucho más alta sin necesidad real. Sigue siendo
+// ajustable por variable de entorno si Rodrigo quiere más de un par por día.
+const GUIDES_PER_RUN_FREE = parseInt(process.env.GUIDES_PER_RUN_FREE || '1', 10);
+const GUIDES_PER_RUN_PREMIUM = parseInt(process.env.GUIDES_PER_RUN_PREMIUM || '1', 10);
+const HISTORY_LOOKBACK = 12; // cuántos pares recientes se miran para no repetir combinación de categorías
 
 // Ver el comentario largo en dropbox-auth.js (auditoría de confiabilidad,
 // 2/9/2026): sin límite propio, una llamada colgada dejaba la corrida
@@ -145,6 +173,80 @@ function saveCatalog(catalog) {
 function knowledgeCategories() {
   if (!fs.existsSync(KNOWLEDGE_DIR)) return [];
   return fs.readdirSync(KNOWLEDGE_DIR).filter((f) => f.endsWith('.md'));
+}
+
+// Categorías elegibles como TEMA de una guía — todo lo que hay en
+// /knowledge MENOS reglas.md. reglas.md sigue cargándose siempre como
+// contexto (ver fullKnowledgeSnapshot() más abajo, que sí usa
+// knowledgeCategories() sin filtrar — eso no cambia): es el archivo interno
+// de reglas de voz/comportamiento de Mentis, y tiene sentido que la guía se
+// escriba respetándolo. Lo que NO tiene sentido es que se lo pueda elegir
+// como si fuera un TEMA de guía a cruzar con otro — BUG REAL encontrado el
+// 27/9/2026: como antes se usaba knowledgeCategories() tal cual también acá,
+// reglas.md terminaba en la lista de "categorías disponibles" que se le
+// ofrecía a Mentis para cruzar como contenido — un riesgo real, justo con
+// la regla de nunca revelar el mecanismo interno (reglas.md describe cómo
+// funciona Mentis por dentro).
+function contentCategories() {
+  return knowledgeCategories().filter((f) => f !== 'reglas.md');
+}
+
+// Categorías "núcleo" — pedido explícito de Rodrigo (27/9/2026): quiere que
+// la mayoría de las guías (y, de acá en más, de los reels que se escriben
+// sobre ellas — ver daily-script.js) hablen de redes sociales, marketing de
+// red y de cómo la IA/automatización ayuda a vender, en vez de cualquier
+// tema suelto de todo lo que hay cargado. En vez de "borrar y rehacer" el
+// catálogo entero (lo que pidió al principio, pero tiraría abajo el
+// historial de reenganche de guide-delivery.js sin necesidad), esto solo
+// sesga lo que se genera DE ACÁ EN ADELANTE — el catálogo viejo queda como
+// está.
+const CORE_CATEGORIES = [
+  'redes-sociales.md', 'network-marketing.md', 'multinivel.md', 'marketing.md',
+  'copywriting-persuasion.md', 'psicologia-consumidor.md', 'inteligencia-artificial.md',
+  'ventas.md', 'storytelling-oratoria.md',
+];
+// 1 de cada 5 pares (20%) se arma completamente libre, sin exigir ninguna
+// categoría núcleo — variedad a propósito, para no volver el catálogo
+// monotemático ni dejar de usar el resto del conocimiento cargado
+// (disciplina, mentalidad, finanzas, liderazgo, etc.).
+const CORE_BIAS_CYCLE = 5;
+
+// Elige 2 o 3 categorías para UN PAR gratis+premium (misma combinación para
+// las dos), evitando repetir una combinación ya usada recientemente.
+// `forceCore`: si es true, al menos una de las categorías elegidas tiene
+// que venir de CORE_CATEGORIES. Antes esta elección se la pedíamos a
+// Mentis dentro del prompt de cada guía (texto libre, sin ninguna forma de
+// imponerle un sesgo real); ahora la decide este código, con números, y
+// Mentis solo escribe la guía a partir de la combinación ya fijada — más
+// simple y más confiable que pedirle a Mentis, como instrucción de texto,
+// que siga un "80% de las veces" — un modelo de lenguaje no cuenta bien
+// eso a lo largo de muchas corridas independientes.
+//
+// Reintenta hasta 15 veces si la combinación elegida al azar ya se usó hace
+// poco — con un catálogo chico y una ventana de HISTORY_LOOKBACK pares
+// recientes, 15 intentos alcanza de sobra en la práctica; si aun así no
+// encuentra una combinación libre, devuelve la última igual (nunca bloquea
+// la corrida por esto — el catálogo sigue creciendo y la ventana de
+// "recientes" se va vaciando sola con el tiempo).
+function pickCategoryCombo(categories, recentCombos, forceCore) {
+  const recentSet = new Set(recentCombos.map((c) => c.split(' + ').sort().join(' + ')));
+  const coreAvailable = categories.filter((c) => CORE_CATEGORIES.includes(c));
+  let combo = null;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    const size = Math.random() < 0.5 ? 2 : 3;
+    const picked = [];
+    if (forceCore && coreAvailable.length > 0) {
+      picked.push(coreAvailable[Math.floor(Math.random() * coreAvailable.length)]);
+    }
+    const rest = categories.filter((c) => !picked.includes(c));
+    while (picked.length < size && rest.length > 0) {
+      const idx = Math.floor(Math.random() * rest.length);
+      picked.push(rest.splice(idx, 1)[0]);
+    }
+    combo = picked;
+    if (!recentSet.has([...combo].sort().join(' + '))) break;
+  }
+  return combo;
 }
 
 function fullKnowledgeSnapshot() {
@@ -258,7 +360,7 @@ async function callMentis(prompt, maxTokens) {
   return JSON.parse(jsonMatch[0]);
 }
 
-async function generateGuide(tipo, recentCombos, categories) {
+async function generateGuide(tipo, categoriasFijas) {
   // Las guías premium piden explícitamente más profundidad (varios
   // frameworks, ejemplos paso a paso) que las gratis — con el formato viejo
   // (un bloque de texto) 4000 tokens alcanzaba casi siempre, pero el nuevo
@@ -320,10 +422,7 @@ async function generateGuide(tipo, recentCombos, categories) {
 
   const prompt = `Sos Mentis armando el catálogo de guías descargables del sistema (Módulo 02).
 
-Categorías de conocimiento disponibles: ${categories.join(', ')}.
-
-Elegí 2 o 3 de esas categorías que se complementen bien entre sí (nunca uses una sola categoría) y escribí UNA guía nueva y completa a partir de ellas. No repitas ninguna de estas combinaciones ya usadas recientemente para este mismo tipo de guía:
-${recentCombos.length ? recentCombos.join('\n') : '(sin historial todavía)'}
+Las categorías de conocimiento para esta guía ya fueron elegidas: ${categoriasFijas.join(', ')}. Escribí UNA guía nueva y completa que combine ESTAS categorías (sin agregar ni cambiar ninguna) — nunca te quedes en una sola, tienen que complementarse entre sí de verdad.
 
 ${depthNote}
 
@@ -348,7 +447,7 @@ La guía se entrega en dos formatos que tienen que decir exactamente lo mismo: u
 Los ÚLTIMOS dos bloques del array (después de todo el contenido) tienen que ser el cierre de venta descripto arriba: un "titulo" y un "parrafo" — ese "parrafo" se dibuja como una tarjeta de cierre propia, así que envolvé en **negrita** la frase concreta de la invitación (ej. "escribile la palabra **PREMIUM**") para que resalte en color dentro de la tarjeta.
 
 Devolvé SOLO un objeto JSON válido, sin texto antes ni después ni bloque de código, con esta forma exacta:
-{"categorias": ["archivo1.md", "archivo2.md"], "titulo": "<título de la guía, claro y concreto>", "subtitulo": "<una frase corta que va debajo del título en la portada>", "bloques": [ ...los bloques descriptos arriba, la guía completa... ], "citas": [{"autor": "...", "obra": "...", "frase": "..."}]}
+{"titulo": "<título de la guía, claro y concreto>", "subtitulo": "<una frase corta que va debajo del título en la portada>", "bloques": [ ...los bloques descriptos arriba, la guía completa... ], "citas": [{"autor": "...", "obra": "...", "frase": "..."}]}
 
 "citas" es la lista resumen de auditoría: un elemento por cada bloque de tipo "cita" que hayas usado (mismo autor/obra/frase). Va vacío ([]) si no usaste ninguna cita textual.
 
@@ -378,79 +477,120 @@ async function runWeeklyGuides() {
   }
   const catalog = loadCatalog();
 
-  const categories = knowledgeCategories();
+  const categories = contentCategories();
   if (categories.length < 2) {
     return { ok: false, error: 'Todavía no hay al menos 2 categorías de conocimiento cargadas — hace falta que corra la lectura diaria primero.' };
   }
+  // parCounter persiste en el propio catálogo (se sube a Dropbox con todo
+  // lo demás) — es lo que hace determinístico el sesgo 80/20 de
+  // CORE_BIAS_CYCLE a lo largo de MUCHAS corridas separadas en el tiempo,
+  // en vez de un simple "80% al azar" que en pocas corridas por día puede
+  // dar rachas (varios días seguidos sin ninguna categoría núcleo, por pura
+  // casualidad).
+  if (typeof catalog.parCounter !== 'number') catalog.parCounter = 0;
 
   const dateStr = todayUTC();
   const generated = [];
   const failures = [];
   const pdfJobs = []; // { id, fname, buffer } generados en memoria, a la espera de subirse a Dropbox junto con todo lo demás
-  const plan = [
-    { tipo: 'gratis', count: GUIDES_PER_RUN_FREE },
-    { tipo: 'premium', count: GUIDES_PER_RUN_PREMIUM },
+
+  // Combinaciones recientes para no repetir — ya no separadas por tipo
+  // (gratis/premium), porque ahora un par comparte la misma combinación:
+  // mirar el historial combinado evita elegir de nuevo una combinación que
+  // ya usó, por ejemplo, la premium de hace 2 días.
+  function getRecentCombos() {
+    return catalog.entries.slice(-HISTORY_LOOKBACK * 2).map((e) => e.categorias.join(' + '));
+  }
+
+  async function generateAndSave(tipo, categoriasFijas) {
+    const result = await generateGuide(tipo, categoriasFijas);
+    if (!Array.isArray(result.bloques) || result.bloques.length === 0) throw new Error('Mentis no devolvió bloques de contenido válidos para la guía — no se guardó.');
+    const cats = categoriasFijas;
+
+    // BUG REAL encontrado en auditoría (3/9/2026): el id (y por lo tanto
+    // el nombre del archivo) se arma solo con fecha+tipo+título — nada
+    // impedía que dos guías del MISMO tipo generadas en la MISMA corrida
+    // terminaran con títulos que, una vez "slugificados", dieran el mismo
+    // id. Cuando eso pasa, la segunda guía sobreescribe el .md de la
+    // primera en disco ANTES de subir nada (mismo nombre de archivo) y el
+    // catálogo queda con dos entradas iguales en id apuntando al mismo
+    // archivo — la primera guía generada (y ya pagada como llamada a la
+    // API) desaparece en silencio. Un sufijo corto random cuando hay choque
+    // es más barato y más simple que pedirle unicidad a Mentis, y no cambia
+    // el id de ninguna guía ya existente (el catálogo entero, no solo esta
+    // corrida, es lo que se chequea). Importante para daily-script.js
+    // (fetchTodaysGuide): el id SIEMPRE arranca con "<fecha>-gratis-" o
+    // "<fecha>-premium-" — el sufijo random, si aparece, va al final, nunca
+    // adelante — así que buscar por ese prefijo sigue siendo seguro.
+    let id = `${dateStr}-${tipo}-${slugify(result.titulo)}`;
+    if (catalog.entries.some((e) => e.id === id)) {
+      id = `${id}-${Math.random().toString(36).slice(2, 6)}`;
+    }
+    const fname = `${id}.md`;
+    const citas = Array.isArray(result.citas) ? result.citas : [];
+    const body = `# ${result.titulo}\n\n${result.subtitulo ? `*${result.subtitulo}*\n\n` : ''}*Guía ${tipo} — ${dateStr} — categorías: ${cats.join(', ')}*\n\n---\n\n${bloquesToMarkdown(result.bloques)}`;
+    fs.writeFileSync(path.join(GUIDES_DIR, fname), body);
+
+    catalog.entries.push({
+      id, tipo, categorias: cats, titulo: result.titulo, archivo: fname,
+      creadaEn: new Date().toISOString(), citas: citas.length,
+    });
+    generated.push({ id, tipo, titulo: result.titulo });
+
+    // El PDF es una entrega aparte del .md de arriba, que ya quedó
+    // guardado y es válido por sí solo — si esto falla (o si pdfkit no
+    // está disponible en este deploy), la guía sigue existiendo igual,
+    // solo sin la versión con diseño para esta corrida puntual.
+    if (renderGuidePDF) {
+      try {
+        const buffer = await renderGuidePDF({
+          tipo, titulo: result.titulo, subtitulo: result.subtitulo, categorias: cats, bloques: result.bloques,
+        });
+        pdfJobs.push({ id, fname: `${id}.pdf`, buffer });
+      } catch (err) {
+        failures.push({ tipo, error: `PDF de "${result.titulo}": ${err.message}` });
+      }
+    }
+  }
+
+  // Pareo gratis+premium (27/9/2026, ver el comentario grande al principio
+  // del archivo): por cada par se elige UNA combinación de categorías y se
+  // usa para las dos guías — mismo tema, distinta profundidad. pairCount es
+  // cuántos pares completos entran en esta corrida según el cupo
+  // configurado (GUIDES_PER_RUN_FREE/PREMIUM); si algún día no son iguales,
+  // el sobrante de cualquiera de los dos se genera suelto al final, con su
+  // propia combinación (sin pareja), para no perder cupo configurado por
+  // Rodrigo — nunca se descarta silenciosamente.
+  const pairCount = Math.min(GUIDES_PER_RUN_FREE, GUIDES_PER_RUN_PREMIUM);
+  const extra = [
+    ...Array(Math.max(0, GUIDES_PER_RUN_FREE - pairCount)).fill('gratis'),
+    ...Array(Math.max(0, GUIDES_PER_RUN_PREMIUM - pairCount)).fill('premium'),
   ];
 
-  for (const { tipo, count } of plan) {
-    let recentCombos = catalog.entries
-      .filter((e) => e.tipo === tipo)
-      .slice(-HISTORY_LOOKBACK)
-      .map((e) => e.categorias.join(' + '));
+  for (let p = 0; p < pairCount; p++) {
+    const forceCore = catalog.parCounter % CORE_BIAS_CYCLE !== CORE_BIAS_CYCLE - 1;
+    catalog.parCounter += 1;
+    const combo = pickCategoryCombo(categories, getRecentCombos(), forceCore);
+    try {
+      await generateAndSave('gratis', combo);
+    } catch (err) {
+      failures.push({ tipo: 'gratis', error: err.message });
+    }
+    try {
+      await generateAndSave('premium', combo);
+    } catch (err) {
+      failures.push({ tipo: 'premium', error: err.message });
+    }
+  }
 
-    for (let i = 0; i < count; i++) {
-      try {
-        const result = await generateGuide(tipo, recentCombos, categories);
-        const cats = Array.isArray(result.categorias) ? result.categorias.filter((c) => categories.includes(c)) : [];
-        if (cats.length < 2) throw new Error('Mentis devolvió menos de 2 categorías válidas para la guía — no se guardó.');
-        if (!Array.isArray(result.bloques) || result.bloques.length === 0) throw new Error('Mentis no devolvió bloques de contenido válidos para la guía — no se guardó.');
-
-        // BUG REAL encontrado en auditoría (3/9/2026): el id (y por lo tanto
-        // el nombre del archivo) se arma solo con fecha+tipo+título — nada
-        // impedía que dos guías del MISMO tipo generadas en la MISMA corrida
-        // (ej. las 2 premium de hoy) terminaran con títulos que, una vez
-        // "slugificados", dieran el mismo id. Cuando eso pasa, la segunda
-        // guía sobreescribe el .md de la primera en disco ANTES de subir
-        // nada (mismo nombre de archivo) y el catálogo queda con dos
-        // entradas iguales en id apuntando al mismo archivo — la primera
-        // guía generada (y ya pagada como llamada a la API) desaparece en
-        // silencio. Un sufijo corto random cuando hay choque es más barato
-        // y más simple que pedirle unicidad a Mentis, y no cambia el id de
-        // ninguna guía ya existente (el catálogo entero, no solo esta
-        // corrida, es lo que se chequea).
-        let id = `${dateStr}-${tipo}-${slugify(result.titulo)}`;
-        if (catalog.entries.some((e) => e.id === id)) {
-          id = `${id}-${Math.random().toString(36).slice(2, 6)}`;
-        }
-        const fname = `${id}.md`;
-        const citas = Array.isArray(result.citas) ? result.citas : [];
-        const body = `# ${result.titulo}\n\n${result.subtitulo ? `*${result.subtitulo}*\n\n` : ''}*Guía ${tipo} — ${dateStr} — categorías: ${cats.join(', ')}*\n\n---\n\n${bloquesToMarkdown(result.bloques)}`;
-        fs.writeFileSync(path.join(GUIDES_DIR, fname), body);
-
-        catalog.entries.push({
-          id, tipo, categorias: cats, titulo: result.titulo, archivo: fname,
-          creadaEn: new Date().toISOString(), citas: citas.length,
-        });
-        recentCombos.push(cats.join(' + '));
-        generated.push({ id, tipo, titulo: result.titulo });
-
-        // El PDF es una entrega aparte del .md de arriba, que ya quedó
-        // guardado y es válido por sí solo — si esto falla (o si pdfkit no
-        // está disponible en este deploy), la guía sigue existiendo igual,
-        // solo sin la versión con diseño para esta corrida puntual.
-        if (renderGuidePDF) {
-          try {
-            const buffer = await renderGuidePDF({
-              tipo, titulo: result.titulo, subtitulo: result.subtitulo, categorias: cats, bloques: result.bloques,
-            });
-            pdfJobs.push({ id, fname: `${id}.pdf`, buffer });
-          } catch (err) {
-            failures.push({ tipo, error: `PDF de "${result.titulo}": ${err.message}` });
-          }
-        }
-      } catch (err) {
-        failures.push({ tipo, error: err.message });
-      }
+  for (const tipo of extra) {
+    const forceCore = catalog.parCounter % CORE_BIAS_CYCLE !== CORE_BIAS_CYCLE - 1;
+    catalog.parCounter += 1;
+    const combo = pickCategoryCombo(categories, getRecentCombos(), forceCore);
+    try {
+      await generateAndSave(tipo, combo);
+    } catch (err) {
+      failures.push({ tipo, error: err.message });
     }
   }
 

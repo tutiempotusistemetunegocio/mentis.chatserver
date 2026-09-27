@@ -201,7 +201,7 @@ async function renderPanel(secret) {
   const guidesSection = `
     <section>
       <h2>Guías <span class="count">${gratis.length} gratis · ${premium.length} premium</span></h2>
-      <p class="hint">Se arman solas cada semana (weekly-guides.js) — al menos ${process.env.GUIDES_PER_RUN_FREE || 2} gratis y ${process.env.GUIDES_PER_RUN_PREMIUM || 2} premium por corrida. Tocá el título para leer la guía completa.</p>
+      <p class="hint">Se arman solas todos los días (weekly-guides.js) — ${process.env.GUIDES_PER_RUN_FREE || 1} gratis y ${process.env.GUIDES_PER_RUN_PREMIUM || 1} premium por corrida, en pares sobre el mismo tema. Tocá el título para leer la guía completa.</p>
       <div class="cols">
         <div>
           <h3>Gratis</h3>
