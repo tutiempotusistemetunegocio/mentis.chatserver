@@ -13,7 +13,8 @@
 // free tier, 512MB, se quedó sin memoria una vez con algo más liviano que
 // esto — ver daily-media.md) sigue siendo válida, y pdfkit soporta
 // embeber una fuente TTF real sin levantar ningún navegador, así que se
-// pudo sumar la tipografía real (carpeta fonts/, ~800KB en total, costo de
+// pudo sumar la tipografía real (5 archivos Poppins-*.ttf en la raíz del
+// repo, ~800KB en total, costo de
 // memoria trivial) sin tener que resignar la arquitectura liviana.
 //
 // Los colores de acá se sacaron muestreando el PDF de referencia en
@@ -55,14 +56,18 @@ const MARGIN = {
 };
 
 // ---------------------------------------------------------------------------
-// Tipografía — Poppins real, embebida desde fonts/*.ttf (bajada de
+// Tipografía — Poppins real, embebida desde Poppins-*.ttf en la raíz (bajada de
 // google/fonts, licencia OFL). Si por lo que sea los archivos no están en
 // el deploy (ej. alguien los borró sin querer), esto NUNCA tira abajo el
 // PDF entero: se cae a Helvetica y sigue. `F` es el mapa de nombres de
 // fuente que usa TODO el resto del archivo — nunca un 'Helvetica-Bold' o
 // 'Poppins-Bold' sueltos más abajo, siempre a través de F, así el
 // fallback funciona en un solo lugar.
-const FONT_DIR = path.join(__dirname, 'fonts');
+// Los .ttf viven directo en la raíz del repo (junto a server.js), NO en una
+// subcarpeta — a propósito, para que subirlos por la web de GitHub sea
+// arrastrar y soltar los 5 archivos sueltos, sin tener que lograr que
+// GitHub cree una carpeta nueva primero.
+const FONT_DIR = __dirname;
 function registerFonts(doc) {
   try {
     doc.registerFont('Poppins', path.join(FONT_DIR, 'Poppins-Regular.ttf'));
@@ -74,7 +79,7 @@ function registerFonts(doc) {
       reg: 'Poppins', light: 'Poppins-Light', med: 'Poppins-Medium', semi: 'Poppins-SemiBold', bold: 'Poppins-Bold',
     };
   } catch (err) {
-    console.error('No se pudieron cargar las fuentes Poppins (carpeta fonts/) — se arma el PDF con Helvetica:', err.message);
+    console.error('No se pudieron cargar las fuentes Poppins (Poppins-*.ttf en la raíz del repo) — se arma el PDF con Helvetica:', err.message);
     return {
       reg: 'Helvetica', light: 'Helvetica', med: 'Helvetica', semi: 'Helvetica-Bold', bold: 'Helvetica-Bold',
     };
