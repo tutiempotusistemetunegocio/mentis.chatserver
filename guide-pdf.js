@@ -294,6 +294,106 @@ function drawAccentCard(doc, { bgColor, accentColor, boxHeight, padding = 16 }) 
   return boxY;
 }
 
+// BUG REAL reportado por Rodrigo con una guía real (27/9/2026): un título
+// de sección quedó solo, pegado arriba del pie de página, con un hueco en
+// blanco enorme debajo — y el bloque que le seguía (una tabla) apareció
+// recién al principio de la página siguiente. Pasaba porque el chequeo de
+// "¿entra en lo que queda de la página?" de 'titulo' (más abajo) solo medía
+// la altura del título mismo: si quedaba justo lo suficiente para EL
+// TÍTULO pero no para nada más, el título se dibujaba igual ahí, y como el
+// bloque siguiente hace su propio chequeo por separado, terminaba saltando
+// entero a la próxima página — un título nunca puede quedar huérfano así.
+//
+// estimateFollowupHeight() calcula cuánto necesita, como mínimo, el bloque
+// que sigue a un título, para que el chequeo de página de 'titulo' pueda
+// exigir "el título Y algo de lo que sigue" en vez de solo "el título". No
+// hace falta que sea exacto (no dibuja nada, solo mide) — alcanza con no
+// quedarse corto: de más, como mucho fuerza un salto de página de más
+// (inofensivo); de menos, es el mismo bug que reportó Rodrigo. Por eso cada
+// caso usa la MISMA fórmula que ya usa el chequeo propio de ese tipo de
+// bloque más abajo (o, para los que se pueden partir en el medio —
+// 'lista', 'pasos', 'tabla', 'grafico' — solo el primer ítem/fila, que es
+// lo mínimo que ese bloque va a mostrar antes de decidir si sigue en esta
+// página o no).
+function estimateFollowupHeight(doc, bloque, F, contentWidth) {
+  if (!bloque) return 0;
+  switch (bloque.tipo) {
+    case 'titulo': {
+      doc.font(F.bold).fontSize(21);
+      return doc.heightOfString(bloque.texto || '', { width: contentWidth }) + 24;
+    }
+    case 'parrafo':
+      return richTextHeight(doc, bloque.texto, F.reg, 12.5, contentWidth, 5);
+    case 'lista': {
+      const items = bloque.items || [];
+      if (!items.length) return 0;
+      return richTextHeight(doc, items[0], F.reg, 12, contentWidth - 20, 4);
+    }
+    case 'cita': {
+      const padding = 22;
+      const innerWidth = contentWidth - padding * 2 - 8;
+      const paragraphs = String(bloque.texto || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+      return padding + 30 + padding + richTextHeight(doc, paragraphs[0] || '', F.bold, 16, innerWidth, 4);
+    }
+    case 'pasos': {
+      const items = (bloque.items || []).filter(Boolean);
+      if (!items.length) return 0;
+      const circleR = 20;
+      const padding = 18;
+      const textWidth = contentWidth - (padding * 2 + circleR * 2) - padding;
+      const m = /^\*\*([^*]+)\*\*:?\s*(.*)$/s.exec(items[0]);
+      const titulo = m ? m[1].trim() : null;
+      const cuerpo = m ? m[2].trim() : items[0];
+      let h = padding * 2;
+      if (titulo) {
+        doc.font(F.bold).fontSize(14.5);
+        h += doc.heightOfString(titulo, { width: textWidth }) + 6;
+      }
+      if (cuerpo) h += richTextHeight(doc, cuerpo, F.reg, 11.5, textWidth, 3);
+      return Math.max(h, circleR * 2 + padding);
+    }
+    case 'destacado': {
+      const padding = 18;
+      const innerWidth = contentWidth - padding * 2 - 8;
+      const paragraphs = String(bloque.texto || '').split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+      return padding * 2 + richTextHeight(doc, paragraphs[0] || '', F.semi, 13, innerWidth, 4);
+    }
+    case 'alerta': {
+      const padding = 20;
+      const iconWidth = 40;
+      const innerWidth = contentWidth - padding * 2 - iconWidth;
+      return Math.max(richTextHeight(doc, bloque.texto, F.bold, 14, innerWidth, 4) + padding * 2, 70);
+    }
+    case 'tabla': {
+      const headers = bloque.headers || [];
+      const filas = bloque.filas || [];
+      const cols = headers.length || (filas[0] ? filas[0].length : 0);
+      if (!cols) return 0;
+      const colWidth = contentWidth / cols;
+      const cellPad = 9;
+      const cellHeight = (text, fontName, fontSize) => {
+        doc.font(fontName).fontSize(fontSize);
+        return doc.heightOfString(String(text == null ? '' : text), { width: colWidth - cellPad * 2, lineGap: 2 }) + cellPad * 2;
+      };
+      const headerHeight = Math.max(...headers.map((h) => cellHeight(h, F.semi, 11)), 28);
+      const firstRowHeight = filas[0] ? Math.max(...filas[0].map((c) => cellHeight(c, F.reg, 11)), 24) : 0;
+      return headerHeight + firstRowHeight;
+    }
+    case 'grafico': {
+      let h = 0;
+      if (bloque.titulo) {
+        doc.font(F.semi).fontSize(12);
+        h += doc.heightOfString(bloque.titulo, { width: contentWidth }) + 5;
+      }
+      return h + 16 + 16; // alto de una sola fila de barra (barHeight + rowGap)
+    }
+    case 'comparacion':
+      return 90; // mismo mínimo que ya usa el chequeo propio de 'comparacion' (Math.min(boxHeight, 90))
+    default:
+      return 40;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // renderBloque — dibuja un bloque de contenido dentro del cuerpo de una
 // página (fondo blanco). TODO texto acá pasa x explícita en su primera
@@ -301,17 +401,26 @@ function drawAccentCard(doc, { bgColor, accentColor, boxHeight, padding = 16 }) 
 // dejó el bloque anterior (bug real documentado en versiones previas de
 // este archivo: un bloque que dibuja en columnas corridas desalineaba al
 // siguiente si este dependía del cursor implícito).
-function renderBloque(doc, bloque, F) {
+//
+// `nextBloque` (opcional) es el bloque que viene justo después en el
+// array — SOLO lo usa 'titulo', para el chequeo de "no quedar huérfano"
+// explicado arriba en estimateFollowupHeight(). El resto de los tipos lo
+// ignora.
+function renderBloque(doc, bloque, F, nextBloque) {
   const contentWidth = doc.page.width - MARGIN.left - MARGIN.right;
 
   if (bloque.tipo === 'titulo') {
     doc.moveDown(1.0);
     doc.font(F.bold).fontSize(21);
     const headingHeight = doc.heightOfString(bloque.texto, { width: contentWidth });
-    if (doc.y + headingHeight + 24 > doc.page.height - MARGIN.bottom) {
+    const followupHeight = estimateFollowupHeight(doc, nextBloque, F, contentWidth);
+    if (doc.y + headingHeight + 24 + followupHeight > doc.page.height - MARGIN.bottom) {
       doc.addPage();
     }
-    doc.fillColor(COLOR_INK);
+    // Se vuelve a fijar fuente/tamaño acá a propósito: estimateFollowupHeight()
+    // de arriba mide otros tipos de bloque y para eso cambia doc.font()/doc.fontSize()
+    // — nunca hay que asumir que sigue en Poppins-Bold/21 después de llamarla.
+    doc.font(F.bold).fontSize(21).fillColor(COLOR_INK);
     doc.text(bloque.texto, MARGIN.left, doc.y, { width: contentWidth });
     const ruleY = doc.y + 6;
     doc.save();
@@ -848,7 +957,7 @@ async function renderGuidePDF(guide) {
           return;
         }
         if (i > 0 && isClosingPair(bloques, i - 1)) return; // ya se dibujó junto con el título anterior
-        renderBloque(doc, bloque, F);
+        renderBloque(doc, bloque, F, bloques[i + 1]);
       });
 
       // Header + pie de página — recién ahora, en un paso aparte sobre las
